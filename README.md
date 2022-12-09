@@ -1,19 +1,40 @@
-# README
+# Phonon Terminal
 
-## About
+Currently a mono repo. Once ready for release only the contents of `./phonon-terminal` will be included in the repo. This is my first golang project so feedback is very welcome.
 
-This is the official Wails React-TS template.
+## Phonon Terminal
 
-You can configure the project by editing `wails.json`. More information about the project settings can be found
-here: https://wails.io/docs/reference/project-config
+A web server written in golang designed to be run on a user's local machine.
 
-## Live Development
+- endpoints to access card functionality
+- endpoints to request and grant permissions
+- web sockets for pushing card and permission changes to subscribers
+- logic to watch for card reader state changes
 
-To run in live development mode, run `wails dev` in the project directory. This will run a Vite development
-server that will provide very fast hot reload of your frontend changes. If you want to develop in a browser
-and have access to your Go methods, there is also a dev server that runs on http://localhost:34115. Connect
-to this in your browser, and you can call your Go code from devtools.
+## Components
 
-## Building
+### Phonon Terminal JS
 
-To build a redistributable, production mode package, use `wails build`.
+Simple http and web socket client for accessing a local running phonon terminal
+
+### Native Wallet
+
+An example of how a native app can integrate the phonon terminal package and grant itself admin privileges.
+
+- built using Wails and a React front end
+- imports the phonon terminal package into the backend and phonon terminal js sdk into the front end
+- most of the native logic is around loading config and granting admin permissions to the front end
+
+### Web Wallet
+
+An example of how a web app is able to request permissions, subscribe to card events and access card functionality.
+
+- built use React
+- imports the phonon terminal js sdk into the front end
+
+## Running
+
+1. Install wails (https://wails.io/docs/gettingstarted/installation)
+2. In `./native-wallet/front-end` run `yarn`
+3. In `./native-wallet/front-end` run `wails dev`
+4. In `./web-wallet` run `yarn && yarn start`

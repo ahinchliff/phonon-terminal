@@ -94,9 +94,9 @@ func getAppDirectory() (string, error) {
 	}
 	switch runtime.GOOS {
 	case "darwin", "linux":
-		return homedir + "/.phonon-desktop/", nil
+		return homedir + "/.phonon-terminal/", nil
 	case "windows":
-		return homedir + "\\.phonon-desktop\\", nil
+		return homedir + "\\.phonon-terminal\\", nil
 	default:
 		return "", fmt.Errorf("unable to set configuration path for %s", runtime.GOOS)
 	}
