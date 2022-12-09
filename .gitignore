@@ -1,0 +1,10 @@
+node_modules
+dist
+.DS_Store
+
+native-wallet/build/bin
+native-wallet/build/darwin
+native-wallet/build/windows
+
+
+

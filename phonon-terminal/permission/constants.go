@@ -1,0 +1,14 @@
+package permission
+
+import "errors"
+
+var (
+	ErrNoNewPermissions = errors.New("no new permissions")
+)
+
+var (
+	PERMISSION_READ_CARDS     = "READ_CARDS"
+	PERMISSION_READ_PHONONS   = "READ_PHONONS"
+	PERMISSION_CREATE_PHONONS = "CREATE_PHONONS"
+	VALID_PERMISSIONS         = []string{PERMISSION_READ_CARDS, PERMISSION_READ_PHONONS, PERMISSION_CREATE_PHONONS}
+)
