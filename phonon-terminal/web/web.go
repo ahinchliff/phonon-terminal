@@ -81,6 +81,7 @@ func (web *WebServer) Start(addr string) {
 
 	r.HandleFunc("/cards", web.listCards).Methods("GET")
 	r.HandleFunc("/cards/{cardId}/unlock", web.unlock).Methods("POST")
+	r.HandleFunc("/cards/{cardId}/name", web.setCardName).Methods("POST")
 	r.HandleFunc("/cards/{cardId}/phonons", web.listPhonons).Methods("GET")
 	r.HandleFunc("/cards/{cardId}/phonons", web.createPhonon).Methods("POST")
 	r.HandleFunc("/cards/{cardId}/phonons", web.redeemPhonon).Methods("DELETE")
@@ -187,6 +188,44 @@ func (web *WebServer) listCards(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(responseBody)
+}
+
+func (web *WebServer) setCardName(w http.ResponseWriter, r *http.Request) {
+	if !web.hasPermission(permission.PERMISSION_SET_CARD_NAME, w, r) {
+		return
+	}
+
+	vars := mux.Vars(r)
+	cardId := vars["cardId"]
+
+	card := web.cards.GetCard(cardId)
+	if card == nil {
+		http.Error(w, "card not found", http.StatusNotFound)
+		return
+	}
+
+	if !card.Session.IsUnlocked() {
+		http.Error(w, "card locked", http.StatusForbidden)
+		return
+	}
+
+	var body interfaces.SetCardNameRequestBody
+
+	err := json.NewDecoder(r.Body).Decode(&body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	err = card.Session.SetName(body.Name)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(interfaces.SuccessResponse{
+		Success: true,
+	})
 }
 
 func (web *WebServer) unlock(w http.ResponseWriter, r *http.Request) {

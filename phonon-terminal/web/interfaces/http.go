@@ -54,6 +54,10 @@ type GetPhononsResponseBody struct {
 	Phonons []Phonon `json:"phonons"`
 }
 
+type SetCardNameRequestBody struct {
+	Name string `json:"name"`
+}
+
 func CardsToHttpCards(cards []*card.Card) []Card {
 	https := []Card{}
 	for _, c := range cards {
