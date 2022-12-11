@@ -5,6 +5,7 @@ import (
 
 	"github.com/GridPlus/keycard-go/io"
 	"github.com/GridPlus/phonon-client/card"
+	"github.com/GridPlus/phonon-client/config"
 	"github.com/GridPlus/phonon-client/orchestrator"
 )
 
@@ -47,7 +48,7 @@ func (sm *CardManager) GetCard(cardId string) *Card {
 	var card *Card
 
 	for _, c := range sm.Cards {
-		if c.Session.GetName() == cardId {
+		if c.Session.GetCardId() == cardId {
 			card = c
 		}
 	}
@@ -56,7 +57,11 @@ func (sm *CardManager) GetCard(cardId string) *Card {
 }
 
 func (sm *CardManager) addCard(sc SmartCard) {
-	cs := card.NewPhononCommandSet(io.NewNormalChannel(sc.Card))
+
+	// todo - look into what config needs to be passed down
+	config := config.Config{}
+
+	cs := card.NewPhononCommandSet(io.NewNormalChannel(sc.Card), config)
 	session, err := orchestrator.NewSession(cs)
 	if err != nil {
 		fmt.Println("Unable to create a new session with card", err)
@@ -69,7 +74,7 @@ func (sm *CardManager) addCard(sc SmartCard) {
 
 	sm.Cards = append(sm.Cards, &s)
 
-	sm.NewCardChannel <- s.Session.GetName()
+	sm.NewCardChannel <- s.Session.GetCardId()
 }
 
 func (sm *CardManager) removeCard(reader string) {
@@ -86,7 +91,7 @@ func (sm *CardManager) removeCard(reader string) {
 	}
 
 	if card != nil {
-		sm.RemovedCardChannel <- card.Session.GetName()
+		sm.RemovedCardChannel <- card.Session.GetCardId()
 	}
 
 	sm.Cards = updatedCards

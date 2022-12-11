@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GridPlus/phonon-client/model"
 	"github.com/ahinchliff/phonon-terminal/phonon-terminal/card"
 	"github.com/ahinchliff/phonon-terminal/phonon-terminal/permission"
 	"github.com/ahinchliff/phonon-terminal/phonon-terminal/web/interfaces"
@@ -277,10 +278,10 @@ func (web *WebServer) createPhonon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sendPhononEvent(interfaces.SOCKET_EVENT_PHONON_CREATED, web, cardId, index)
+	sendPhononEvent(interfaces.SOCKET_EVENT_PHONON_CREATED, web, cardId, uint16(index))
 
 	json.NewEncoder(w).Encode(interfaces.Phonon{
-		Index:     index,
+		Index:     uint16(index),
 		PublicKey: publicKey.String(),
 	})
 }
@@ -312,7 +313,7 @@ func (web *WebServer) redeemPhonon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	privateKey, err := card.Session.DestroyPhonon(body.Index)
+	privateKey, err := card.Session.DestroyPhonon(model.PhononKeyIndex(body.Index))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

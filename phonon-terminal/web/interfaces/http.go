@@ -65,7 +65,7 @@ func CardsToHttpCards(cards []*card.Card) []Card {
 
 func cardToHttpCard(card *card.Card) Card {
 	return Card{
-		Id:           card.Session.GetName(),
+		Id:           card.Session.GetCardId(),
 		IsUnlocked:   card.Session.IsUnlocked(),
 		IsInitialize: card.Session.IsInitialized(),
 	}
@@ -82,7 +82,7 @@ func PhononsToHttpPhonons(phonons []*model.Phonon) []Phonon {
 
 func PhononToHttpPhonon(phonon model.Phonon) Phonon {
 	return Phonon{
-		Index:     phonon.KeyIndex,
+		Index:     uint16(phonon.KeyIndex),
 		PublicKey: phonon.PubKey.String(),
 	}
 }
