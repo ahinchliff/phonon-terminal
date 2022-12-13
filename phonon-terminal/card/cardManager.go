@@ -7,11 +7,13 @@ import (
 	"github.com/GridPlus/phonon-client/card"
 	"github.com/GridPlus/phonon-client/config"
 	"github.com/GridPlus/phonon-client/orchestrator"
+	"github.com/google/uuid"
 )
 
 type Card struct {
 	Reader  string
 	Session *orchestrator.Session
+	IsMock  bool
 }
 
 type CardManager struct {
@@ -56,6 +58,42 @@ func (sm *CardManager) GetCard(cardId string) *Card {
 	return card
 }
 
+func (sm *CardManager) CreateMockCard() (string, error) {
+	c, err := card.NewMockCard(true, false)
+	if err != nil {
+		return "", err
+	}
+
+	session, err := orchestrator.NewSession(c)
+	if err != nil {
+		return "", err
+	}
+
+	s := Card{
+		Reader:  uuid.NewString(),
+		Session: session,
+		IsMock:  true,
+	}
+
+	sm.Cards = append(sm.Cards, &s)
+
+	sm.NewCardChannel <- s.Session.GetCardId()
+
+	return s.Session.GetCardId(), nil
+}
+
+func (sm *CardManager) ClearMockCards() {
+	var updatedCards []*Card
+
+	for _, c := range sm.Cards {
+		if c.IsMock == false {
+			updatedCards = append(updatedCards, c)
+		}
+	}
+
+	sm.Cards = updatedCards
+}
+
 func (sm *CardManager) addCard(sc SmartCard) {
 
 	// todo - look into what config needs to be passed down
@@ -64,12 +102,14 @@ func (sm *CardManager) addCard(sc SmartCard) {
 	cs := card.NewPhononCommandSet(io.NewNormalChannel(sc.Card), config)
 	session, err := orchestrator.NewSession(cs)
 	if err != nil {
-		fmt.Println("Unable to create a new session with card", err)
+		fmt.Println("Unable to create a new session with card: ", err)
+		return
 	}
 
 	s := Card{
 		Reader:  sc.Reader,
 		Session: session,
+		IsMock:  false,
 	}
 
 	sm.Cards = append(sm.Cards, &s)
