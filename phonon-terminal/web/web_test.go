@@ -66,8 +66,8 @@ func setupTest[body any](t *testing.T) TestHelpers[body] {
 	}
 }
 
-func createMockCard(unlock bool) *card.Card {
-	cardId, _ := web.cards.CreateMockCard()
+func createMockCard(initalise bool, unlock bool) *card.Card {
+	cardId, _ := web.cards.CreateMockCard(initalise)
 
 	card := web.cards.GetCard(cardId)
 
@@ -282,8 +282,8 @@ func TestListCards(t *testing.T) {
 	t.Run("Returns the correct number of cards when app has permission", func(t *testing.T) {
 		helpers := setupTest[any](t)
 		helpers.AddPermissions([]string{permission.PERMISSION_READ_CARDS})
-		createMockCard(false)
-		createMockCard(false)
+		createMockCard(true, false)
+		createMockCard(true, false)
 		defer helpers.Teardown(t)
 
 		res := helpers.SendRequest("GET", ENDPOINT, nil)
@@ -299,7 +299,7 @@ func TestListCards(t *testing.T) {
 	t.Run("Returns the correct number of cards when app is admin", func(t *testing.T) {
 		helpers := setupTest[any](t)
 		helpers.SetAsAdmin()
-		createMockCard(false)
+		createMockCard(true, false)
 		defer helpers.Teardown(t)
 
 		res := helpers.SendRequest("GET", ENDPOINT, nil)
@@ -320,7 +320,7 @@ func TestRequestUnlockCard(t *testing.T) {
 
 	t.Run("Returns forbidden when app doesnt have correct permissions", func(t *testing.T) {
 		helpers := setupTest[any](t)
-		card := createMockCard(false)
+		card := createMockCard(true, false)
 		defer helpers.Teardown(t)
 
 		res := helpers.SendRequest("POST", getEndpoint(card.Session.GetCardId()), nil)
@@ -343,7 +343,7 @@ func TestRequestUnlockCard(t *testing.T) {
 	t.Run("Returns success when app has permission", func(t *testing.T) {
 		helpers := setupTest[any](t)
 		helpers.AddPermissions([]string{permission.PERMISSION_READ_CARDS})
-		card := createMockCard(false)
+		card := createMockCard(true, false)
 
 		defer helpers.Teardown(t)
 
@@ -361,7 +361,7 @@ func TestRequestRedeem(t *testing.T) {
 
 	t.Run("Returns forbidden when app doesnt have correct permissions", func(t *testing.T) {
 		helpers := setupTest[interfaces.RequestRedeemPhononRequestBody](t)
-		card := createMockCard(true)
+		card := createMockCard(true, true)
 		index, _, _ := card.Session.CreatePhonon()
 		defer helpers.Teardown(t)
 
@@ -378,7 +378,7 @@ func TestRequestRedeem(t *testing.T) {
 	t.Run("Returns forbidden when card is locked", func(t *testing.T) {
 		helpers := setupTest[interfaces.RequestRedeemPhononRequestBody](t)
 		helpers.AddPermissions([]string{permission.PERMISSION_READ_PHONONS})
-		card := createMockCard(false)
+		card := createMockCard(true, false)
 		index, _, _ := card.Session.CreatePhonon()
 		defer helpers.Teardown(t)
 
@@ -395,7 +395,7 @@ func TestRequestRedeem(t *testing.T) {
 	t.Run("Returns not found when supplied an invalid card ID", func(t *testing.T) {
 		helpers := setupTest[interfaces.RequestRedeemPhononRequestBody](t)
 		helpers.AddPermissions([]string{permission.PERMISSION_READ_PHONONS})
-		card := createMockCard(true)
+		card := createMockCard(true, true)
 		index, _, _ := card.Session.CreatePhonon()
 		defer helpers.Teardown(t)
 
@@ -412,7 +412,7 @@ func TestRequestRedeem(t *testing.T) {
 	t.Run("Returns success when app has permission", func(t *testing.T) {
 		helpers := setupTest[interfaces.RequestRedeemPhononRequestBody](t)
 		helpers.AddPermissions([]string{permission.PERMISSION_READ_PHONONS})
-		card := createMockCard(true)
+		card := createMockCard(true, true)
 		index, _, _ := card.Session.CreatePhonon()
 		defer helpers.Teardown(t)
 
@@ -436,7 +436,7 @@ func TestSetCardName(t *testing.T) {
 
 	t.Run("Returns forbidden when app doesnt have correct permissions", func(t *testing.T) {
 		helpers := setupTest[interfaces.SetCardNameRequestBody](t)
-		card := createMockCard(true)
+		card := createMockCard(true, true)
 
 		defer helpers.Teardown(t)
 
@@ -468,7 +468,7 @@ func TestSetCardName(t *testing.T) {
 	t.Run("Returns forbidden when card is locked", func(t *testing.T) {
 		helpers := setupTest[interfaces.SetCardNameRequestBody](t)
 		helpers.AddPermissions([]string{permission.PERMISSION_SET_CARD_NAME})
-		card := createMockCard(false)
+		card := createMockCard(true, false)
 
 		defer helpers.Teardown(t)
 
@@ -485,7 +485,7 @@ func TestSetCardName(t *testing.T) {
 	t.Run("Correctly sets card name when app has permission", func(t *testing.T) {
 		helpers := setupTest[interfaces.SetCardNameRequestBody](t)
 		helpers.AddPermissions([]string{permission.PERMISSION_SET_CARD_NAME})
-		card := createMockCard(true)
+		card := createMockCard(true, true)
 		defer helpers.Teardown(t)
 
 		requestBody := interfaces.SetCardNameRequestBody{
@@ -504,7 +504,7 @@ func TestSetCardName(t *testing.T) {
 	t.Run("Correctly sets card name when app is admin", func(t *testing.T) {
 		helpers := setupTest[interfaces.SetCardNameRequestBody](t)
 		helpers.SetAsAdmin()
-		card := createMockCard(true)
+		card := createMockCard(true, true)
 		defer helpers.Teardown(t)
 
 		requestBody := interfaces.SetCardNameRequestBody{
@@ -528,7 +528,7 @@ func TestListPhonons(t *testing.T) {
 
 	t.Run("Returns forbidden when app doesnt have correct permissions", func(t *testing.T) {
 		helpers := setupTest[any](t)
-		card := createMockCard(true)
+		card := createMockCard(true, true)
 		defer helpers.Teardown(t)
 
 		res := helpers.SendRequest("GET", getEndpoint(card.Session.GetCardId()), nil)
@@ -540,7 +540,7 @@ func TestListPhonons(t *testing.T) {
 	t.Run("Returns forbidden when card is locked", func(t *testing.T) {
 		helpers := setupTest[any](t)
 		helpers.AddPermissions([]string{permission.PERMISSION_READ_PHONONS})
-		card := createMockCard(false)
+		card := createMockCard(true, false)
 		defer helpers.Teardown(t)
 
 		res := helpers.SendRequest("GET", getEndpoint(card.Session.GetCardId()), nil)
@@ -563,7 +563,7 @@ func TestListPhonons(t *testing.T) {
 	t.Run("Returns an empty array when no phonons exist", func(t *testing.T) {
 		helpers := setupTest[any](t)
 		helpers.AddPermissions([]string{permission.PERMISSION_READ_PHONONS})
-		card := createMockCard(true)
+		card := createMockCard(true, true)
 		defer helpers.Teardown(t)
 
 		res := helpers.SendRequest("GET", getEndpoint(card.Session.GetCardId()), nil)
@@ -579,7 +579,7 @@ func TestListPhonons(t *testing.T) {
 	t.Run("Returns the expected number of phonons when app has permission", func(t *testing.T) {
 		helpers := setupTest[any](t)
 		helpers.AddPermissions([]string{permission.PERMISSION_READ_PHONONS})
-		card := createMockCard(true)
+		card := createMockCard(true, true)
 		card.Session.CreatePhonon()
 		card.Session.CreatePhonon()
 		defer helpers.Teardown(t)
@@ -597,7 +597,7 @@ func TestListPhonons(t *testing.T) {
 	t.Run("Returns the expected number of phonons when app is admin", func(t *testing.T) {
 		helpers := setupTest[any](t)
 		helpers.SetAsAdmin()
-		card := createMockCard(true)
+		card := createMockCard(true, true)
 		card.Session.CreatePhonon()
 		defer helpers.Teardown(t)
 
@@ -619,7 +619,7 @@ func TestCreatePhonon(t *testing.T) {
 
 	t.Run("Returns forbidden when app doesnt have correct permissions", func(t *testing.T) {
 		helpers := setupTest[any](t)
-		card := createMockCard(true)
+		card := createMockCard(true, true)
 		defer helpers.Teardown(t)
 
 		res := helpers.SendRequest("POST", getEndpoint(card.Session.GetCardId()), nil)
@@ -631,7 +631,7 @@ func TestCreatePhonon(t *testing.T) {
 	t.Run("Returns forbidden when card is locked", func(t *testing.T) {
 		helpers := setupTest[any](t)
 		helpers.AddPermissions([]string{permission.PERMISSION_CREATE_PHONONS})
-		card := createMockCard(false)
+		card := createMockCard(true, false)
 		defer helpers.Teardown(t)
 
 		res := helpers.SendRequest("POST", getEndpoint(card.Session.GetCardId()), nil)
@@ -654,7 +654,7 @@ func TestCreatePhonon(t *testing.T) {
 	t.Run("Creates a phonon when app has permission", func(t *testing.T) {
 		helpers := setupTest[any](t)
 		helpers.AddPermissions([]string{permission.PERMISSION_CREATE_PHONONS})
-		card := createMockCard(true)
+		card := createMockCard(true, true)
 		defer helpers.Teardown(t)
 
 		res := helpers.SendRequest("POST", getEndpoint(card.Session.GetCardId()), nil)
@@ -669,7 +669,7 @@ func TestCreatePhonon(t *testing.T) {
 	t.Run("Creates a phonon when app is admin", func(t *testing.T) {
 		helpers := setupTest[any](t)
 		helpers.SetAsAdmin()
-		card := createMockCard(true)
+		card := createMockCard(true, true)
 		defer helpers.Teardown(t)
 
 		res := helpers.SendRequest("POST", getEndpoint(card.Session.GetCardId()), nil)
@@ -689,7 +689,7 @@ func TestRedeemPhonon(t *testing.T) {
 
 	t.Run("Returns forbidden when app is not admin", func(t *testing.T) {
 		helpers := setupTest[interfaces.RedeemPhononRequestBody](t)
-		card := createMockCard(true)
+		card := createMockCard(true, true)
 		index, _, _ := card.Session.CreatePhonon()
 		defer helpers.Teardown(t)
 
@@ -706,7 +706,7 @@ func TestRedeemPhonon(t *testing.T) {
 	t.Run("Returns forbidden when card is locked", func(t *testing.T) {
 		helpers := setupTest[interfaces.RedeemPhononRequestBody](t)
 		helpers.SetAsAdmin()
-		card := createMockCard(false)
+		card := createMockCard(true, false)
 		index, _, _ := card.Session.CreatePhonon()
 		defer helpers.Teardown(t)
 
@@ -723,7 +723,7 @@ func TestRedeemPhonon(t *testing.T) {
 	t.Run("Returns not found when supplied an invalid card ID", func(t *testing.T) {
 		helpers := setupTest[interfaces.RedeemPhononRequestBody](t)
 		helpers.SetAsAdmin()
-		card := createMockCard(true)
+		card := createMockCard(true, true)
 		card.Session.CreatePhonon()
 		defer helpers.Teardown(t)
 
@@ -740,7 +740,7 @@ func TestRedeemPhonon(t *testing.T) {
 	t.Run("Returns not found when supplied an invalid phonon index", func(t *testing.T) {
 		helpers := setupTest[interfaces.RedeemPhononRequestBody](t)
 		helpers.SetAsAdmin()
-		card := createMockCard(true)
+		card := createMockCard(true, true)
 		card.Session.CreatePhonon()
 		defer helpers.Teardown(t)
 
@@ -757,7 +757,7 @@ func TestRedeemPhonon(t *testing.T) {
 	t.Run("Redeems phonon when app is admin", func(t *testing.T) {
 		helpers := setupTest[interfaces.RedeemPhononRequestBody](t)
 		helpers.SetAsAdmin()
-		card := createMockCard(true)
+		card := createMockCard(true, true)
 		index, _, _ := card.Session.CreatePhonon()
 		defer helpers.Teardown(t)
 
@@ -772,5 +772,74 @@ func TestRedeemPhonon(t *testing.T) {
 		assert := assert.New(t)
 		assert.Equal(http.StatusOK, res.StatusCode)
 		assert.Len(phonons, 0)
+	})
+}
+
+func TestInitialiseCard(t *testing.T) {
+	getEndpoint := func(cardId string) string {
+		return "http://localhost:3001/admin/cards/" + cardId + "/init"
+	}
+
+	t.Run("Returns forbidden when app is not admin", func(t *testing.T) {
+		helpers := setupTest[interfaces.InitialiseCardRequestBody](t)
+		card := createMockCard(false, false)
+		defer helpers.Teardown(t)
+
+		requestBody := interfaces.InitialiseCardRequestBody{
+			Pin: "111111",
+		}
+
+		res := helpers.SendRequest("POST", getEndpoint(card.Session.GetCardId()), &requestBody)
+
+		assert := assert.New(t)
+		assert.Equal(http.StatusForbidden, res.StatusCode)
+	})
+
+	t.Run("Returns not found when supplied an invalid card ID", func(t *testing.T) {
+		helpers := setupTest[interfaces.InitialiseCardRequestBody](t)
+		helpers.SetAsAdmin()
+		defer helpers.Teardown(t)
+
+		requestBody := interfaces.InitialiseCardRequestBody{
+			Pin: "111111",
+		}
+
+		res := helpers.SendRequest("POST", getEndpoint("invalid"), &requestBody)
+
+		assert := assert.New(t)
+		assert.Equal(http.StatusNotFound, res.StatusCode)
+	})
+
+	t.Run("Returns bad request when card is initalised", func(t *testing.T) {
+		helpers := setupTest[interfaces.InitialiseCardRequestBody](t)
+		helpers.SetAsAdmin()
+		card := createMockCard(true, false)
+		defer helpers.Teardown(t)
+
+		requestBody := interfaces.InitialiseCardRequestBody{
+			Pin: "111111",
+		}
+
+		res := helpers.SendRequest("POST", getEndpoint(card.Session.GetCardId()), &requestBody)
+
+		assert := assert.New(t)
+		assert.Equal(http.StatusBadRequest, res.StatusCode)
+	})
+
+	t.Run("Initialises the card when app is admin", func(t *testing.T) {
+		helpers := setupTest[interfaces.InitialiseCardRequestBody](t)
+		helpers.SetAsAdmin()
+		card := createMockCard(false, false)
+		defer helpers.Teardown(t)
+
+		requestBody := interfaces.InitialiseCardRequestBody{
+			Pin: "111111",
+		}
+
+		res := helpers.SendRequest("POST", getEndpoint(card.Session.GetCardId()), &requestBody)
+
+		assert := assert.New(t)
+		assert.Equal(http.StatusOK, res.StatusCode)
+		assert.True(card.Session.IsInitialized())
 	})
 }

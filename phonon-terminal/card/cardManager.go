@@ -58,8 +58,8 @@ func (sm *CardManager) GetCard(cardId string) *Card {
 	return card
 }
 
-func (sm *CardManager) CreateMockCard() (string, error) {
-	c, err := card.NewMockCard(true, false)
+func (sm *CardManager) CreateMockCard(initialise bool) (string, error) {
+	c, err := card.NewMockCard(initialise, false)
 	if err != nil {
 		return "", err
 	}

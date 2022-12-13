@@ -33,7 +33,7 @@ type GetCardsResponseBody struct {
 	Cards []Card `json:"cards"`
 }
 
-type UnlockRequestBody struct {
+type UnlockCardRequestBody struct {
 	Pin string `json:"pin"`
 }
 
@@ -61,6 +61,22 @@ type GetPhononsResponseBody struct {
 
 type SetCardNameRequestBody struct {
 	Name string `json:"name"`
+}
+
+type ConnectToPairingServerRequestBody struct {
+	Url string `json:"url"`
+}
+
+type PairCardRequestBody struct {
+	CounterpartyCardId string `json:"counterpartyCardId"`
+}
+
+type SendPhononsRequestBody struct {
+	PhononIndices string `json:"phononIndices"`
+}
+
+type InitialiseCardRequestBody struct {
+	Pin string `json:"pin"`
 }
 
 func CardsToHttpCards(cards []*card.Card) []Card {

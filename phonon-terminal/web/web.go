@@ -80,15 +80,19 @@ func (web *WebServer) Start(addr string) error {
 	r.HandleFunc("/permissions", web.requestPermissions).Methods("POST")
 
 	r.HandleFunc("/cards", web.listCards).Methods("GET")
-	r.HandleFunc("/cards/{cardId}/unlock", web.requestUnlock).Methods("POST")
+	r.HandleFunc("/cards/{cardId}/unlock", web.requestUnlockCard).Methods("POST")
 	r.HandleFunc("/cards/{cardId}/name", web.setCardName).Methods("POST")
 	r.HandleFunc("/cards/{cardId}/phonons", web.listPhonons).Methods("GET")
 	r.HandleFunc("/cards/{cardId}/phonons", web.createPhonon).Methods("POST")
 	r.HandleFunc("/cards/{cardId}/phonons", web.requestRedeemPhonon).Methods("DELETE")
 
 	r.HandleFunc("/admin/permissions", web.adminAddPermissions).Methods("POST")
-	r.HandleFunc("/admin/cards/{cardId}/unlock", web.adminUnlock).Methods("POST")
+	r.HandleFunc("/admin/cards/{cardId}/init", web.adminInitialiseCard).Methods("POST")
+	r.HandleFunc("/admin/cards/{cardId}/unlock", web.adminUnlockCard).Methods("POST")
 	r.HandleFunc("/admin/cards/{cardId}/phonons", web.adminRedeemPhonon).Methods("DELETE")
+	r.HandleFunc("/admin/cards/{cardId}/phonons/send", web.adminSendPhonon).Methods("POST")
+	r.HandleFunc("/admin/cards/{cardId}/remote", web.adminConnectToRemotePairingServer).Methods("POST")
+	r.HandleFunc("/admin/cards/{cardId}/pair", web.adminPairCard).Methods("POST")
 
 	c := cors.New(cors.Options{
 		AllowedMethods:   []string{http.MethodGet, http.MethodPost, http.MethodDelete},
@@ -240,7 +244,7 @@ func (web *WebServer) setCardName(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (web *WebServer) requestUnlock(w http.ResponseWriter, r *http.Request) {
+func (web *WebServer) requestUnlockCard(w http.ResponseWriter, r *http.Request) {
 	if !web.hasPermission(permission.PERMISSION_READ_CARDS, w, r) {
 		return
 	}
@@ -398,6 +402,126 @@ func (web *WebServer) requestRedeemPhonon(w http.ResponseWriter, r *http.Request
 	})
 }
 
+func (web *WebServer) adminConnectToRemotePairingServer(w http.ResponseWriter, r *http.Request) {
+	if !web.isAdmin(w, r) {
+		return
+	}
+
+	vars := mux.Vars(r)
+	cardId := vars["cardId"]
+
+	card := web.cards.GetCard(cardId)
+	if card == nil {
+		http.Error(w, "card not found", http.StatusNotFound)
+		return
+	}
+
+	if !card.Session.IsUnlocked() {
+		http.Error(w, "card locked", http.StatusForbidden)
+		return
+	}
+
+	var body interfaces.ConnectToPairingServerRequestBody
+
+	err := json.NewDecoder(r.Body).Decode(&body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	err = card.Session.ConnectToRemoteProvider(body.Url)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	json.NewEncoder(w).Encode(interfaces.SuccessResponse{
+		Success: true,
+	})
+}
+
+func (web *WebServer) adminSendPhonon(w http.ResponseWriter, r *http.Request) {
+	if !web.isAdmin(w, r) {
+		return
+	}
+
+	vars := mux.Vars(r)
+	cardId := vars["cardId"]
+
+	card := web.cards.GetCard(cardId)
+	if card == nil {
+		http.Error(w, "card not found", http.StatusNotFound)
+		return
+	}
+
+	if !card.Session.IsUnlocked() {
+		http.Error(w, "card locked", http.StatusForbidden)
+		return
+	}
+
+	var body interfaces.SendPhononsRequestBody
+
+	err := json.NewDecoder(r.Body).Decode(&body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var indices []model.PhononKeyIndex
+
+	for _, i := range body.PhononIndices {
+		indices = append(indices, model.PhononKeyIndex(i))
+	}
+
+	err = card.Session.SendPhonons(indices)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(interfaces.SuccessResponse{
+		Success: true,
+	})
+}
+
+func (web *WebServer) adminPairCard(w http.ResponseWriter, r *http.Request) {
+	if !web.isAdmin(w, r) {
+		return
+	}
+
+	vars := mux.Vars(r)
+	cardId := vars["cardId"]
+
+	card := web.cards.GetCard(cardId)
+	if card == nil {
+		http.Error(w, "card not found", http.StatusNotFound)
+		return
+	}
+
+	if !card.Session.IsUnlocked() {
+		http.Error(w, "card locked", http.StatusForbidden)
+		return
+	}
+
+	var body interfaces.PairCardRequestBody
+
+	err := json.NewDecoder(r.Body).Decode(&body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	err = card.Session.ConnectToCounterparty(body.CounterpartyCardId)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(interfaces.SuccessResponse{
+		Success: true,
+	})
+}
+
 func (web *WebServer) adminRedeemPhonon(w http.ResponseWriter, r *http.Request) {
 	if !web.isAdmin(w, r) {
 		return
@@ -464,7 +588,46 @@ func (web *WebServer) adminRedeemPhonon(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-func (web *WebServer) adminUnlock(w http.ResponseWriter, r *http.Request) {
+func (web *WebServer) adminInitialiseCard(w http.ResponseWriter, r *http.Request) {
+	if !web.isAdmin(w, r) {
+		return
+	}
+
+	vars := mux.Vars(r)
+	cardId := vars["cardId"]
+
+	card := web.cards.GetCard(cardId)
+
+	if card == nil {
+		http.Error(w, "card not found", http.StatusNotFound)
+		return
+	}
+
+	if card.Session.IsInitialized() {
+		http.Error(w, "card is already initialized", http.StatusBadRequest)
+		return
+	}
+
+	var body interfaces.InitialiseCardRequestBody
+
+	err := json.NewDecoder(r.Body).Decode(&body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	err = card.Session.Init(body.Pin)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(interfaces.SuccessResponse{
+		Success: true,
+	})
+}
+
+func (web *WebServer) adminUnlockCard(w http.ResponseWriter, r *http.Request) {
 	if !web.isAdmin(w, r) {
 		return
 	}
@@ -486,7 +649,7 @@ func (web *WebServer) adminUnlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var body interfaces.UnlockRequestBody
+	var body interfaces.UnlockCardRequestBody
 
 	err := json.NewDecoder(r.Body).Decode(&body)
 	if err != nil {
