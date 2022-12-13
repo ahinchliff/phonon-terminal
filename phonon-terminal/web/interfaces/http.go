@@ -42,12 +42,17 @@ type AddPermissionsRequestBody struct {
 	Permissions []string `json:"permissions"`
 }
 
-type RedeemPhononRequestBody struct {
+type RequestRedeemPhononRequestBody struct {
 	Index uint16 `json:"index"`
 }
 
+type RedeemPhononRequestBody struct {
+	Index uint16  `json:"index"`
+	AppId *string `json:"appId"`
+}
+
 type RedeemPhononResponseBody struct {
-	PrivateKey string `json:"PrivateKey"`
+	PrivateKey string `json:"privateKey"`
 }
 
 type GetPhononsResponseBody struct {

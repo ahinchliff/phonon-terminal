@@ -35,8 +35,8 @@ type WebServer struct {
 	permissions    *permission.PermissionManager
 	sockets        map[string]*websocket.Conn
 	secret         *ecdsa.PrivateKey
-	AdminToken     string
 	adminSessionId string
+	AdminToken     string
 }
 
 var wsUpgrader = websocket.Upgrader{
@@ -69,7 +69,7 @@ func New(cm *card.CardManager, secret string, permissionStoreFilePath string) (*
 	}, nil
 }
 
-func (web *WebServer) Start(addr string) {
+func (web *WebServer) Start(addr string) error {
 	r := mux.NewRouter()
 	r.Use(contentTypeApplicationJsonMiddleware)
 	r.Use(web.getAuthMiddleware())
@@ -80,14 +80,15 @@ func (web *WebServer) Start(addr string) {
 	r.HandleFunc("/permissions", web.requestPermissions).Methods("POST")
 
 	r.HandleFunc("/cards", web.listCards).Methods("GET")
-	r.HandleFunc("/cards/{cardId}/unlock", web.unlock).Methods("POST")
+	r.HandleFunc("/cards/{cardId}/unlock", web.requestUnlock).Methods("POST")
 	r.HandleFunc("/cards/{cardId}/name", web.setCardName).Methods("POST")
 	r.HandleFunc("/cards/{cardId}/phonons", web.listPhonons).Methods("GET")
 	r.HandleFunc("/cards/{cardId}/phonons", web.createPhonon).Methods("POST")
-	r.HandleFunc("/cards/{cardId}/phonons", web.redeemPhonon).Methods("DELETE")
+	r.HandleFunc("/cards/{cardId}/phonons", web.requestRedeemPhonon).Methods("DELETE")
 
 	r.HandleFunc("/admin/permissions", web.adminAddPermissions).Methods("POST")
 	r.HandleFunc("/admin/cards/{cardId}/unlock", web.adminUnlock).Methods("POST")
+	r.HandleFunc("/admin/cards/{cardId}/phonons", web.adminRedeemPhonon).Methods("DELETE")
 
 	c := cors.New(cors.Options{
 		AllowedMethods:   []string{http.MethodGet, http.MethodPost, http.MethodDelete},
@@ -107,7 +108,13 @@ func (web *WebServer) Start(addr string) {
 	}()
 
 	handler := c.Handler(r)
-	http.ListenAndServe(addr, handler)
+	err := http.ListenAndServe(addr, handler)
+
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+
+	return err
 }
 
 func (web *WebServer) establishWSConnection(w http.ResponseWriter, r *http.Request) {
@@ -119,6 +126,10 @@ func (web *WebServer) establishWSConnection(w http.ResponseWriter, r *http.Reque
 	}
 
 	web.sockets[appId] = ws
+
+	json.NewEncoder(w).Encode(interfaces.SuccessResponse{
+		Success: true,
+	})
 }
 
 func (web *WebServer) listPermissions(w http.ResponseWriter, r *http.Request) {
@@ -129,6 +140,7 @@ func (web *WebServer) listPermissions(w http.ResponseWriter, r *http.Request) {
 	if len(permissions) == 0 {
 		permissions = make([]string, 0)
 	}
+
 	responseBody := &interfaces.GetPermissionsResponseBody{
 		Permissions: permissions,
 	}
@@ -228,7 +240,11 @@ func (web *WebServer) setCardName(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (web *WebServer) unlock(w http.ResponseWriter, r *http.Request) {
+func (web *WebServer) requestUnlock(w http.ResponseWriter, r *http.Request) {
+	if !web.hasPermission(permission.PERMISSION_READ_CARDS, w, r) {
+		return
+	}
+
 	appId := getAppIdFromRequest(r)
 
 	vars := mux.Vars(r)
@@ -325,7 +341,64 @@ func (web *WebServer) createPhonon(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (web *WebServer) redeemPhonon(w http.ResponseWriter, r *http.Request) {
+func (web *WebServer) requestRedeemPhonon(w http.ResponseWriter, r *http.Request) {
+	if !web.hasPermission(permission.PERMISSION_READ_PHONONS, w, r) {
+		return
+	}
+
+	appId := getAppIdFromRequest(r)
+
+	vars := mux.Vars(r)
+	cardId := vars["cardId"]
+
+	card := web.cards.GetCard(cardId)
+	if card == nil {
+		http.Error(w, "card not found", http.StatusNotFound)
+		return
+	}
+
+	if !card.Session.IsUnlocked() {
+		http.Error(w, "card locked", http.StatusForbidden)
+		return
+	}
+
+	var body interfaces.RequestRedeemPhononRequestBody
+
+	err := json.NewDecoder(r.Body).Decode(&body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	phonons, err := card.Session.ListPhonons(0, 0, 0)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	foundPhonon := false
+
+	for _, phonon := range phonons {
+		if phonon.KeyIndex == model.PhononKeyIndex(body.Index) {
+			foundPhonon = true
+			break
+		}
+	}
+
+	if !foundPhonon {
+		http.Error(w, "phonon not found", http.StatusNotFound)
+		return
+	}
+
+	payload := interfaces.NewRedeemRequestEvent(appId, cardId, body.Index)
+	sendEvent(web.adminSessionId, payload, web)
+
+	json.NewEncoder(w).Encode(interfaces.SuccessResponse{
+		Success: true,
+	})
+}
+
+func (web *WebServer) adminRedeemPhonon(w http.ResponseWriter, r *http.Request) {
 	if !web.isAdmin(w, r) {
 		return
 	}
@@ -352,14 +425,42 @@ func (web *WebServer) redeemPhonon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	phonons, err := card.Session.ListPhonons(0, 0, 0)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	foundPhonon := false
+
+	for _, phonon := range phonons {
+		if phonon.KeyIndex == model.PhononKeyIndex(body.Index) {
+			foundPhonon = true
+			break
+		}
+	}
+
+	if !foundPhonon {
+		http.Error(w, "phonon not found", http.StatusNotFound)
+		return
+	}
+
 	privateKey, err := card.Session.DestroyPhonon(model.PhononKeyIndex(body.Index))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	privateKeyHex := hex.EncodeToString(crypto.FromECDSA(privateKey))
+
+	if body.AppId != nil {
+		sendEvent(*body.AppId, interfaces.NewPhononRedeemActionedEvent(cardId, body.Index, privateKeyHex), web)
+	}
+
+	sendPhononEvent(interfaces.SOCKET_EVENT_PHONON_REDEEMED, web, cardId, body.Index)
+
 	json.NewEncoder(w).Encode(interfaces.RedeemPhononResponseBody{
-		PrivateKey: hex.EncodeToString(crypto.FromECDSA(privateKey)),
+		PrivateKey: privateKeyHex,
 	})
 }
 
@@ -416,6 +517,13 @@ func (web *WebServer) adminAddPermissions(w http.ResponseWriter, r *http.Request
 	err := json.NewDecoder(r.Body).Decode(&body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	areValid, invalid := permission.ArePermissionsValid(body.Permissions)
+
+	if !areValid {
+		http.Error(w, "invalid permissions: "+strings.Join(invalid, ","), http.StatusBadRequest)
 		return
 	}
 
@@ -548,7 +656,6 @@ func (web *WebServer) getAuthMiddleware() func(next http.Handler) http.Handler {
 			appId, err := getAppIdFromCookie(r, web.secret)
 
 			if err != nil {
-				fmt.Println("failed to get appId from cookie: " + err.Error())
 
 				newAppId := uuid.NewString()
 
