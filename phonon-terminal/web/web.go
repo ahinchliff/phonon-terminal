@@ -156,6 +156,14 @@ func handlerWrapper[t any](web *WebServer, requirements RouteSettings, handler f
 	}
 }
 
+func newHandlerError(code int, message string) *HandlerError {
+	return &HandlerError{
+		Code:    code,
+		Message: message,
+	}
+
+}
+
 func (web *WebServer) establishWSConnection(w http.ResponseWriter, r *http.Request) {
 	appId := getAppIdFromRequest(r)
 
@@ -188,28 +196,19 @@ func requestPermissions(p HandlerPayload) (*interfaces.SuccessResponse, *Handler
 
 	err := json.NewDecoder(p.Body).Decode(&body)
 	if err != nil {
-		return nil, &HandlerError{
-			Code:    http.StatusBadRequest,
-			Message: err.Error(),
-		}
+		return nil, newHandlerError(http.StatusBadRequest, "invalid body")
 	}
 
 	areValid, invalid := permission.ArePermissionsValid(body.Permissions)
 	if !areValid {
-		return nil, &HandlerError{
-			Code:    http.StatusBadRequest,
-			Message: "invalid permissions: " + strings.Join(invalid, ","),
-		}
+		return nil, newHandlerError(http.StatusBadRequest, "invalid permissions: "+strings.Join(invalid, ","))
 	}
 
 	newPermissions := p.Web.permissions.GetNewPermissions(p.AppId, body.Permissions)
 
 	if body.AdminToken != nil {
 		if *body.AdminToken != p.Web.AdminToken {
-			return nil, &HandlerError{
-				Code:    http.StatusForbidden,
-				Message: "invalid admin token",
-			}
+			return nil, newHandlerError(http.StatusForbidden, "invalid admin token")
 		}
 		p.Web.adminSessionId = p.AppId
 	} else {
@@ -262,18 +261,12 @@ func setCardName(p HandlerPayload) (*interfaces.SuccessResponse, *HandlerError) 
 
 	err := json.NewDecoder(p.Body).Decode(&body)
 	if err != nil {
-		return nil, &HandlerError{
-			Code:    http.StatusBadRequest,
-			Message: err.Error(),
-		}
+		return nil, newHandlerError(http.StatusBadRequest, "invalid body")
 	}
 
 	err = p.Card.Session.SetName(body.Name)
 	if err != nil {
-		return nil, &HandlerError{
-			Code:    http.StatusInternalServerError,
-			Message: err.Error(),
-		}
+		return nil, newHandlerError(http.StatusInternalServerError, err.Error())
 	}
 
 	return &interfaces.SuccessResponse{
@@ -288,19 +281,13 @@ var listPhononsSettings = RouteSettings{
 func listPhonons(p HandlerPayload) (*interfaces.GetPhononsResponseBody, *HandlerError) {
 	phonons, err := p.Card.Session.ListPhonons(0, 0, 0)
 	if err != nil {
-		return nil, &HandlerError{
-			Code:    http.StatusInternalServerError,
-			Message: err.Error(),
-		}
+		return nil, newHandlerError(http.StatusInternalServerError, err.Error())
 	}
 
 	for _, ph := range phonons {
 		if ph.PubKey == nil {
 			ph.PubKey, err = p.Card.Session.GetPhononPubKey(ph.KeyIndex, ph.CurveType)
-			return nil, &HandlerError{
-				Code:    http.StatusInternalServerError,
-				Message: err.Error(),
-			}
+			return nil, newHandlerError(http.StatusInternalServerError, err.Error())
 		}
 	}
 
@@ -318,10 +305,7 @@ var createPhononSettings = RouteSettings{
 func createPhonon(p HandlerPayload) (*interfaces.Phonon, *HandlerError) {
 	index, publicKey, err := p.Card.Session.CreatePhonon()
 	if err != nil {
-		return nil, &HandlerError{
-			Message: err.Error(),
-			Code:    http.StatusInternalServerError,
-		}
+		return nil, newHandlerError(http.StatusInternalServerError, err.Error())
 	}
 
 	sendPhononEvent(interfaces.SOCKET_EVENT_PHONON_CREATED, p.Web, p.Card.Session.GetCardId(), uint16(index))
@@ -341,18 +325,12 @@ func requestRedeemPhonon(p HandlerPayload) (*interfaces.SuccessResponse, *Handle
 
 	err := json.NewDecoder(p.Body).Decode(&body)
 	if err != nil {
-		return nil, &HandlerError{
-			Code:    http.StatusBadRequest,
-			Message: err.Error(),
-		}
+		return nil, newHandlerError(http.StatusInternalServerError, err.Error())
 	}
 
 	phonons, err := p.Card.Session.ListPhonons(0, 0, 0)
 	if err != nil {
-		return nil, &HandlerError{
-			Message: err.Error(),
-			Code:    http.StatusInternalServerError,
-		}
+		return nil, newHandlerError(http.StatusInternalServerError, err.Error())
 	}
 
 	foundPhonon := false
@@ -365,10 +343,7 @@ func requestRedeemPhonon(p HandlerPayload) (*interfaces.SuccessResponse, *Handle
 	}
 
 	if !foundPhonon {
-		return nil, &HandlerError{
-			Message: "Phonon not found",
-			Code:    http.StatusNotFound,
-		}
+		return nil, newHandlerError(http.StatusNotFound, "phonon not found")
 	}
 
 	payload := interfaces.NewRedeemRequestEvent(p.AppId, p.Card.Session.GetCardId(), body.Index)
@@ -388,18 +363,12 @@ func adminConnectToRemotePairingServer(p HandlerPayload) (*interfaces.SuccessRes
 
 	err := json.NewDecoder(p.Body).Decode(&body)
 	if err != nil {
-		return nil, &HandlerError{
-			Code:    http.StatusBadRequest,
-			Message: err.Error(),
-		}
+		return nil, newHandlerError(http.StatusBadRequest, "invalid body")
 	}
 
 	err = p.Card.Session.ConnectToRemoteProvider(body.Url)
 	if err != nil {
-		return nil, &HandlerError{
-			Code:    http.StatusBadRequest,
-			Message: err.Error(),
-		}
+		return nil, newHandlerError(http.StatusBadRequest, err.Error())
 	}
 
 	return &interfaces.SuccessResponse{
@@ -416,10 +385,7 @@ func adminSendPhonon(p HandlerPayload) (*interfaces.SuccessResponse, *HandlerErr
 
 	err := json.NewDecoder(p.Body).Decode(&body)
 	if err != nil {
-		return nil, &HandlerError{
-			Code:    http.StatusBadRequest,
-			Message: err.Error(),
-		}
+		return nil, newHandlerError(http.StatusBadRequest, "invalid body")
 	}
 
 	var indices []model.PhononKeyIndex
@@ -430,10 +396,7 @@ func adminSendPhonon(p HandlerPayload) (*interfaces.SuccessResponse, *HandlerErr
 
 	err = p.Card.Session.SendPhonons(indices)
 	if err != nil {
-		return nil, &HandlerError{
-			Message: err.Error(),
-			Code:    http.StatusInternalServerError,
-		}
+		return nil, newHandlerError(http.StatusInternalServerError, err.Error())
 	}
 
 	return &interfaces.SuccessResponse{
@@ -450,18 +413,12 @@ func adminPairCard(p HandlerPayload) (*interfaces.SuccessResponse, *HandlerError
 
 	err := json.NewDecoder(p.Body).Decode(&body)
 	if err != nil {
-		return nil, &HandlerError{
-			Code:    http.StatusBadRequest,
-			Message: err.Error(),
-		}
+		return nil, newHandlerError(http.StatusBadRequest, "invalid body")
 	}
 
 	err = p.Card.Session.ConnectToCounterparty(body.CounterpartyCardId)
 	if err != nil {
-		return nil, &HandlerError{
-			Code:    http.StatusBadRequest,
-			Message: err.Error(),
-		}
+		return nil, newHandlerError(http.StatusBadRequest, err.Error())
 	}
 
 	return &interfaces.SuccessResponse{
@@ -478,18 +435,12 @@ func adminRedeemPhonon(p HandlerPayload) (*interfaces.RedeemPhononResponseBody, 
 
 	err := json.NewDecoder(p.Body).Decode(&body)
 	if err != nil {
-		return nil, &HandlerError{
-			Code:    http.StatusBadRequest,
-			Message: err.Error(),
-		}
+		return nil, newHandlerError(http.StatusBadRequest, "invalid body")
 	}
 
 	phonons, err := p.Card.Session.ListPhonons(0, 0, 0)
 	if err != nil {
-		return nil, &HandlerError{
-			Code:    http.StatusInternalServerError,
-			Message: err.Error(),
-		}
+		return nil, newHandlerError(http.StatusInternalServerError, err.Error())
 	}
 
 	foundPhonon := false
@@ -502,18 +453,12 @@ func adminRedeemPhonon(p HandlerPayload) (*interfaces.RedeemPhononResponseBody, 
 	}
 
 	if !foundPhonon {
-		return nil, &HandlerError{
-			Message: "Phonon not found",
-			Code:    http.StatusNotFound,
-		}
+		return nil, newHandlerError(http.StatusNotFound, "phonon not found")
 	}
 
 	privateKey, err := p.Card.Session.DestroyPhonon(model.PhononKeyIndex(body.Index))
 	if err != nil {
-		return nil, &HandlerError{
-			Code:    http.StatusInternalServerError,
-			Message: err.Error(),
-		}
+		return nil, newHandlerError(http.StatusInternalServerError, err.Error())
 	}
 
 	privateKeyHex := hex.EncodeToString(crypto.FromECDSA(privateKey))
@@ -537,28 +482,19 @@ var adminInitialiseCardSettings = RouteSettings{
 
 func adminInitialiseCard(p HandlerPayload) (*interfaces.SuccessResponse, *HandlerError) {
 	if p.Card.Session.IsInitialized() {
-		return nil, &HandlerError{
-			Code:    http.StatusBadRequest,
-			Message: "card is already initialized",
-		}
+		return nil, newHandlerError(http.StatusBadRequest, "card is already initialized")
 	}
 
 	var body interfaces.InitialiseCardRequestBody
 
 	err := json.NewDecoder(p.Body).Decode(&body)
 	if err != nil {
-		return nil, &HandlerError{
-			Code:    http.StatusBadRequest,
-			Message: err.Error(),
-		}
+		return nil, newHandlerError(http.StatusBadRequest, "invalid body")
 	}
 
 	err = p.Card.Session.Init(body.Pin)
 	if err != nil {
-		return nil, &HandlerError{
-			Code:    http.StatusInternalServerError,
-			Message: err.Error(),
-		}
+		return nil, newHandlerError(http.StatusInternalServerError, err.Error())
 	}
 
 	return &interfaces.SuccessResponse{
@@ -582,18 +518,12 @@ func adminUnlockCard(p HandlerPayload) (*interfaces.SuccessResponse, *HandlerErr
 
 	err := json.NewDecoder(p.Body).Decode(&body)
 	if err != nil {
-		return nil, &HandlerError{
-			Code:    http.StatusBadRequest,
-			Message: err.Error(),
-		}
+		return nil, newHandlerError(http.StatusBadRequest, "invalid body")
 	}
 
 	err = p.Card.Session.VerifyPIN(body.Pin)
 	if err != nil {
-		return nil, &HandlerError{
-			Code:    http.StatusBadRequest,
-			Message: "Failed to unlock card",
-		}
+		return nil, newHandlerError(http.StatusBadRequest, "invalid pin")
 	}
 
 	sendCardEvent(interfaces.SOCKET_EVENT_CARD_UNLOCKED, p.Web, p.Card.Session.GetCardId())
@@ -612,18 +542,13 @@ func adminAddPermissions(p HandlerPayload) (*interfaces.SuccessResponse, *Handle
 
 	err := json.NewDecoder(p.Body).Decode(&body)
 	if err != nil {
-		return nil, &HandlerError{
-			Code:    http.StatusBadRequest,
-			Message: err.Error(),
-		}
+		return nil, newHandlerError(http.StatusBadRequest, "invalid body")
 	}
+
 	areValid, invalid := permission.ArePermissionsValid(body.Permissions)
 
 	if !areValid {
-		return nil, &HandlerError{
-			Code:    http.StatusBadRequest,
-			Message: "invalid permissions: " + strings.Join(invalid, ","),
-		}
+		return nil, newHandlerError(http.StatusBadRequest, "invalid permissions: "+strings.Join(invalid, ","))
 	}
 
 	p.Web.permissions.AddPermissions(body.AppId, body.Permissions)
