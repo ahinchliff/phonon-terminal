@@ -189,7 +189,10 @@ func (web *WebServer) requestPermissions(w http.ResponseWriter, r *http.Request)
 }
 
 func (web *WebServer) listCards(w http.ResponseWriter, r *http.Request) {
-	if !web.hasPermission(permission.PERMISSION_READ_CARDS, w, r) {
+	_, _, err := web.handleRequirements(w, r, RouteRequirements{
+		Permission: &permission.PERMISSION_READ_CARDS,
+	})
+	if err != nil {
 		return
 	}
 
@@ -207,27 +210,16 @@ func (web *WebServer) listCards(w http.ResponseWriter, r *http.Request) {
 }
 
 func (web *WebServer) setCardName(w http.ResponseWriter, r *http.Request) {
-	if !web.hasPermission(permission.PERMISSION_SET_CARD_NAME, w, r) {
-		return
-	}
-
-	vars := mux.Vars(r)
-	cardId := vars["cardId"]
-
-	card := web.cards.GetCard(cardId)
-	if card == nil {
-		http.Error(w, "card not found", http.StatusNotFound)
-		return
-	}
-
-	if !card.Session.IsUnlocked() {
-		http.Error(w, "card locked", http.StatusForbidden)
+	_, card, err := web.handleRequirements(w, r, RouteRequirements{
+		Permission: &permission.PERMISSION_SET_CARD_NAME,
+	})
+	if err != nil {
 		return
 	}
 
 	var body interfaces.SetCardNameRequestBody
 
-	err := json.NewDecoder(r.Body).Decode(&body)
+	err = json.NewDecoder(r.Body).Decode(&body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -245,23 +237,16 @@ func (web *WebServer) setCardName(w http.ResponseWriter, r *http.Request) {
 }
 
 func (web *WebServer) requestUnlockCard(w http.ResponseWriter, r *http.Request) {
-	if !web.hasPermission(permission.PERMISSION_READ_CARDS, w, r) {
-		return
-	}
-
-	appId := getAppIdFromRequest(r)
-
-	vars := mux.Vars(r)
-	cardId := vars["cardId"]
-
-	card := web.cards.GetCard(cardId)
-	if card == nil {
-		http.Error(w, "card not found", http.StatusNotFound)
+	appId, card, err := web.handleRequirements(w, r, RouteRequirements{
+		Permission:      &permission.PERMISSION_READ_CARDS,
+		CardCanBeLocked: true,
+	})
+	if err != nil {
 		return
 	}
 
 	if !card.Session.IsUnlocked() {
-		payload := interfaces.NewCardUnlockRequestEvent(appId, cardId)
+		payload := interfaces.NewCardUnlockRequestEvent(appId, card.Session.GetCardId())
 		sendEvent(web.adminSessionId, payload, web)
 	}
 
@@ -271,21 +256,10 @@ func (web *WebServer) requestUnlockCard(w http.ResponseWriter, r *http.Request) 
 }
 
 func (web *WebServer) listPhonons(w http.ResponseWriter, r *http.Request) {
-	if !web.hasPermission(permission.PERMISSION_READ_PHONONS, w, r) {
-		return
-	}
-
-	vars := mux.Vars(r)
-	cardId := vars["cardId"]
-
-	card := web.cards.GetCard(cardId)
-	if card == nil {
-		http.Error(w, "card not found", http.StatusNotFound)
-		return
-	}
-
-	if !card.Session.IsUnlocked() {
-		http.Error(w, "card locked", http.StatusForbidden)
+	_, card, err := web.handleRequirements(w, r, RouteRequirements{
+		Permission: &permission.PERMISSION_READ_PHONONS,
+	})
+	if err != nil {
 		return
 	}
 
@@ -313,21 +287,10 @@ func (web *WebServer) listPhonons(w http.ResponseWriter, r *http.Request) {
 }
 
 func (web *WebServer) createPhonon(w http.ResponseWriter, r *http.Request) {
-	if !web.hasPermission(permission.PERMISSION_CREATE_PHONONS, w, r) {
-		return
-	}
-
-	vars := mux.Vars(r)
-	cardId := vars["cardId"]
-
-	card := web.cards.GetCard(cardId)
-	if card == nil {
-		http.Error(w, "card not found", http.StatusNotFound)
-		return
-	}
-
-	if !card.Session.IsUnlocked() {
-		http.Error(w, "card locked", http.StatusForbidden)
+	_, card, err := web.handleRequirements(w, r, RouteRequirements{
+		Permission: &permission.PERMISSION_CREATE_PHONONS,
+	})
+	if err != nil {
 		return
 	}
 
@@ -337,7 +300,7 @@ func (web *WebServer) createPhonon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sendPhononEvent(interfaces.SOCKET_EVENT_PHONON_CREATED, web, cardId, uint16(index))
+	sendPhononEvent(interfaces.SOCKET_EVENT_PHONON_CREATED, web, card.Session.GetCardId(), uint16(index))
 
 	json.NewEncoder(w).Encode(interfaces.Phonon{
 		Index:     uint16(index),
@@ -346,29 +309,16 @@ func (web *WebServer) createPhonon(w http.ResponseWriter, r *http.Request) {
 }
 
 func (web *WebServer) requestRedeemPhonon(w http.ResponseWriter, r *http.Request) {
-	if !web.hasPermission(permission.PERMISSION_READ_PHONONS, w, r) {
-		return
-	}
-
-	appId := getAppIdFromRequest(r)
-
-	vars := mux.Vars(r)
-	cardId := vars["cardId"]
-
-	card := web.cards.GetCard(cardId)
-	if card == nil {
-		http.Error(w, "card not found", http.StatusNotFound)
-		return
-	}
-
-	if !card.Session.IsUnlocked() {
-		http.Error(w, "card locked", http.StatusForbidden)
+	appId, card, err := web.handleRequirements(w, r, RouteRequirements{
+		Permission: &permission.PERMISSION_READ_PHONONS,
+	})
+	if err != nil {
 		return
 	}
 
 	var body interfaces.RequestRedeemPhononRequestBody
 
-	err := json.NewDecoder(r.Body).Decode(&body)
+	err = json.NewDecoder(r.Body).Decode(&body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -394,7 +344,7 @@ func (web *WebServer) requestRedeemPhonon(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	payload := interfaces.NewRedeemRequestEvent(appId, cardId, body.Index)
+	payload := interfaces.NewRedeemRequestEvent(appId, card.Session.GetCardId(), body.Index)
 	sendEvent(web.adminSessionId, payload, web)
 
 	json.NewEncoder(w).Encode(interfaces.SuccessResponse{
@@ -403,27 +353,16 @@ func (web *WebServer) requestRedeemPhonon(w http.ResponseWriter, r *http.Request
 }
 
 func (web *WebServer) adminConnectToRemotePairingServer(w http.ResponseWriter, r *http.Request) {
-	if !web.isAdmin(w, r) {
-		return
-	}
-
-	vars := mux.Vars(r)
-	cardId := vars["cardId"]
-
-	card := web.cards.GetCard(cardId)
-	if card == nil {
-		http.Error(w, "card not found", http.StatusNotFound)
-		return
-	}
-
-	if !card.Session.IsUnlocked() {
-		http.Error(w, "card locked", http.StatusForbidden)
+	_, card, err := web.handleRequirements(w, r, RouteRequirements{
+		IsAdmin: true,
+	})
+	if err != nil {
 		return
 	}
 
 	var body interfaces.ConnectToPairingServerRequestBody
 
-	err := json.NewDecoder(r.Body).Decode(&body)
+	err = json.NewDecoder(r.Body).Decode(&body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -441,27 +380,16 @@ func (web *WebServer) adminConnectToRemotePairingServer(w http.ResponseWriter, r
 }
 
 func (web *WebServer) adminSendPhonon(w http.ResponseWriter, r *http.Request) {
-	if !web.isAdmin(w, r) {
-		return
-	}
-
-	vars := mux.Vars(r)
-	cardId := vars["cardId"]
-
-	card := web.cards.GetCard(cardId)
-	if card == nil {
-		http.Error(w, "card not found", http.StatusNotFound)
-		return
-	}
-
-	if !card.Session.IsUnlocked() {
-		http.Error(w, "card locked", http.StatusForbidden)
+	_, card, err := web.handleRequirements(w, r, RouteRequirements{
+		IsAdmin: true,
+	})
+	if err != nil {
 		return
 	}
 
 	var body interfaces.SendPhononsRequestBody
 
-	err := json.NewDecoder(r.Body).Decode(&body)
+	err = json.NewDecoder(r.Body).Decode(&body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -485,27 +413,16 @@ func (web *WebServer) adminSendPhonon(w http.ResponseWriter, r *http.Request) {
 }
 
 func (web *WebServer) adminPairCard(w http.ResponseWriter, r *http.Request) {
-	if !web.isAdmin(w, r) {
-		return
-	}
-
-	vars := mux.Vars(r)
-	cardId := vars["cardId"]
-
-	card := web.cards.GetCard(cardId)
-	if card == nil {
-		http.Error(w, "card not found", http.StatusNotFound)
-		return
-	}
-
-	if !card.Session.IsUnlocked() {
-		http.Error(w, "card locked", http.StatusForbidden)
+	_, card, err := web.handleRequirements(w, r, RouteRequirements{
+		IsAdmin: true,
+	})
+	if err != nil {
 		return
 	}
 
 	var body interfaces.PairCardRequestBody
 
-	err := json.NewDecoder(r.Body).Decode(&body)
+	err = json.NewDecoder(r.Body).Decode(&body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -523,27 +440,16 @@ func (web *WebServer) adminPairCard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (web *WebServer) adminRedeemPhonon(w http.ResponseWriter, r *http.Request) {
-	if !web.isAdmin(w, r) {
-		return
-	}
-
-	vars := mux.Vars(r)
-	cardId := vars["cardId"]
-
-	card := web.cards.GetCard(cardId)
-	if card == nil {
-		http.Error(w, "card not found", http.StatusNotFound)
-		return
-	}
-
-	if !card.Session.IsUnlocked() {
-		http.Error(w, "card locked", http.StatusForbidden)
+	_, card, err := web.handleRequirements(w, r, RouteRequirements{
+		IsAdmin: true,
+	})
+	if err != nil {
 		return
 	}
 
 	var body interfaces.RedeemPhononRequestBody
 
-	err := json.NewDecoder(r.Body).Decode(&body)
+	err = json.NewDecoder(r.Body).Decode(&body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -578,10 +484,10 @@ func (web *WebServer) adminRedeemPhonon(w http.ResponseWriter, r *http.Request) 
 	privateKeyHex := hex.EncodeToString(crypto.FromECDSA(privateKey))
 
 	if body.AppId != nil {
-		sendEvent(*body.AppId, interfaces.NewPhononRedeemActionedEvent(cardId, body.Index, privateKeyHex), web)
+		sendEvent(*body.AppId, interfaces.NewPhononRedeemActionedEvent(card.Session.GetCardId(), body.Index, privateKeyHex), web)
 	}
 
-	sendPhononEvent(interfaces.SOCKET_EVENT_PHONON_REDEEMED, web, cardId, body.Index)
+	sendPhononEvent(interfaces.SOCKET_EVENT_PHONON_REDEEMED, web, card.Session.GetCardId(), body.Index)
 
 	json.NewEncoder(w).Encode(interfaces.RedeemPhononResponseBody{
 		PrivateKey: privateKeyHex,
@@ -589,17 +495,12 @@ func (web *WebServer) adminRedeemPhonon(w http.ResponseWriter, r *http.Request) 
 }
 
 func (web *WebServer) adminInitialiseCard(w http.ResponseWriter, r *http.Request) {
-	if !web.isAdmin(w, r) {
-		return
-	}
-
-	vars := mux.Vars(r)
-	cardId := vars["cardId"]
-
-	card := web.cards.GetCard(cardId)
-
-	if card == nil {
-		http.Error(w, "card not found", http.StatusNotFound)
+	_, card, err := web.handleRequirements(w, r, RouteRequirements{
+		IsAdmin:                true,
+		CardCanBeLocked:        true,
+		CardCanBeUninitialised: true,
+	})
+	if err != nil {
 		return
 	}
 
@@ -610,7 +511,7 @@ func (web *WebServer) adminInitialiseCard(w http.ResponseWriter, r *http.Request
 
 	var body interfaces.InitialiseCardRequestBody
 
-	err := json.NewDecoder(r.Body).Decode(&body)
+	err = json.NewDecoder(r.Body).Decode(&body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -628,17 +529,11 @@ func (web *WebServer) adminInitialiseCard(w http.ResponseWriter, r *http.Request
 }
 
 func (web *WebServer) adminUnlockCard(w http.ResponseWriter, r *http.Request) {
-	if !web.isAdmin(w, r) {
-		return
-	}
-
-	vars := mux.Vars(r)
-	cardId := vars["cardId"]
-
-	card := web.cards.GetCard(cardId)
-
-	if card == nil {
-		http.Error(w, "card not found", http.StatusNotFound)
+	_, card, err := web.handleRequirements(w, r, RouteRequirements{
+		IsAdmin:         true,
+		CardCanBeLocked: true,
+	})
+	if err != nil {
 		return
 	}
 
@@ -651,7 +546,7 @@ func (web *WebServer) adminUnlockCard(w http.ResponseWriter, r *http.Request) {
 
 	var body interfaces.UnlockCardRequestBody
 
-	err := json.NewDecoder(r.Body).Decode(&body)
+	err = json.NewDecoder(r.Body).Decode(&body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -663,7 +558,7 @@ func (web *WebServer) adminUnlockCard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sendCardEvent(interfaces.SOCKET_EVENT_CARD_UNLOCKED, web, cardId)
+	sendCardEvent(interfaces.SOCKET_EVENT_CARD_UNLOCKED, web, card.Session.GetCardId())
 
 	json.NewEncoder(w).Encode(interfaces.SuccessResponse{
 		Success: true,
@@ -671,13 +566,16 @@ func (web *WebServer) adminUnlockCard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (web *WebServer) adminAddPermissions(w http.ResponseWriter, r *http.Request) {
-	if !web.isAdmin(w, r) {
+	_, _, err := web.handleRequirements(w, r, RouteRequirements{
+		IsAdmin: true,
+	})
+	if err != nil {
 		return
 	}
 
 	var body interfaces.AddPermissionsRequestBody
 
-	err := json.NewDecoder(r.Body).Decode(&body)
+	err = json.NewDecoder(r.Body).Decode(&body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -743,31 +641,6 @@ func getAppIdFromRequest(r *http.Request) string {
 	ctx := r.Context()
 	appId, _ := ctx.Value(CONTEXT_APP_ID_KEY).(string)
 	return appId
-}
-
-func (web *WebServer) hasPermission(requiredPermission string, w http.ResponseWriter, r *http.Request) bool {
-	appId := getAppIdFromRequest(r)
-
-	if appId == web.adminSessionId {
-		return true
-	}
-
-	if web.permissions.HasPermission(appId, requiredPermission) {
-		return true
-	}
-
-	w.WriteHeader(http.StatusForbidden)
-	return false
-}
-
-func (web *WebServer) isAdmin(w http.ResponseWriter, r *http.Request) bool {
-	appId := getAppIdFromRequest(r)
-
-	if appId != web.adminSessionId {
-		w.WriteHeader(http.StatusForbidden)
-	}
-
-	return appId == web.adminSessionId
 }
 
 func sendCardEvent(event string, web *WebServer, cardId string) {
@@ -847,4 +720,49 @@ func (web *WebServer) getAuthMiddleware() func(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+type RouteRequirements struct {
+	IsAdmin                bool
+	Permission             *string
+	CardCanBeLocked        bool
+	CardCanBeUninitialised bool
+}
+
+func (web *WebServer) handleRequirements(w http.ResponseWriter, r *http.Request, requirements RouteRequirements) (appId string, card *card.Card, err error) {
+	appId = getAppIdFromRequest(r)
+
+	if requirements.IsAdmin && appId != web.adminSessionId {
+		w.WriteHeader(http.StatusForbidden)
+		return "", nil, errors.New("App not admin")
+	}
+
+	if appId != web.adminSessionId && requirements.Permission != nil && !web.permissions.HasPermission(appId, *requirements.Permission) {
+		w.WriteHeader(http.StatusForbidden)
+		return "", nil, errors.New("App doesn't have permission")
+	}
+
+	vars := mux.Vars(r)
+	cardId := vars["cardId"]
+
+	if cardId != "" {
+		card = web.cards.GetCard(cardId)
+	}
+
+	if cardId != "" && card == nil {
+		http.Error(w, "card not found", http.StatusNotFound)
+		return "", nil, errors.New("No such card")
+	}
+
+	if card != nil && !requirements.CardCanBeUninitialised && !card.Session.IsInitialized() {
+		http.Error(w, "card isn't initialised", http.StatusForbidden)
+		return "", nil, errors.New("Card isn't initialised")
+	}
+
+	if card != nil && !requirements.CardCanBeLocked && !card.Session.IsUnlocked() {
+		http.Error(w, "card is locked", http.StatusForbidden)
+		return "", nil, errors.New("Card is locked")
+	}
+
+	return appId, card, nil
 }
