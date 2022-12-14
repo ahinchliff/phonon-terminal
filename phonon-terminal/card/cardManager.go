@@ -95,7 +95,6 @@ func (sm *CardManager) ClearMockCards() {
 }
 
 func (sm *CardManager) addCard(sc SmartCard) {
-
 	// todo - look into what config needs to be passed down
 	config := config.Config{}
 

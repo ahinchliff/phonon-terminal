@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -76,23 +77,23 @@ func (web *WebServer) Start(addr string) error {
 
 	r.HandleFunc("/ws", web.establishWSConnection).Methods("GET")
 
-	r.HandleFunc("/permissions", web.listPermissions).Methods("GET")
-	r.HandleFunc("/permissions", web.requestPermissions).Methods("POST")
+	r.HandleFunc("/permissions", handlerWrapper(web, RouteSettings{}, listPermissions)).Methods("GET")
+	r.HandleFunc("/permissions", handlerWrapper(web, RouteSettings{}, requestPermissions)).Methods("POST")
 
-	r.HandleFunc("/cards", web.listCards).Methods("GET")
-	r.HandleFunc("/cards/{cardId}/unlock", web.requestUnlockCard).Methods("POST")
-	r.HandleFunc("/cards/{cardId}/name", web.setCardName).Methods("POST")
-	r.HandleFunc("/cards/{cardId}/phonons", web.listPhonons).Methods("GET")
-	r.HandleFunc("/cards/{cardId}/phonons", web.createPhonon).Methods("POST")
-	r.HandleFunc("/cards/{cardId}/phonons", web.requestRedeemPhonon).Methods("DELETE")
+	r.HandleFunc("/cards", handlerWrapper(web, listCardsSettings, listCards)).Methods("GET")
+	r.HandleFunc("/cards/{cardId}/unlock", handlerWrapper(web, requestCardUnlockSettings, requestUnlockCard)).Methods("POST")
+	r.HandleFunc("/cards/{cardId}/name", handlerWrapper(web, setCardNameSetting, setCardName)).Methods("POST")
+	r.HandleFunc("/cards/{cardId}/phonons", handlerWrapper(web, listPhononsSettings, listPhonons)).Methods("GET")
+	r.HandleFunc("/cards/{cardId}/phonons", handlerWrapper(web, createPhononSettings, createPhonon)).Methods("POST")
+	r.HandleFunc("/cards/{cardId}/phonons", handlerWrapper(web, requestRedeemPhononSettings, requestRedeemPhonon)).Methods("DELETE")
 
-	r.HandleFunc("/admin/permissions", web.adminAddPermissions).Methods("POST")
-	r.HandleFunc("/admin/cards/{cardId}/init", web.adminInitialiseCard).Methods("POST")
-	r.HandleFunc("/admin/cards/{cardId}/unlock", web.adminUnlockCard).Methods("POST")
-	r.HandleFunc("/admin/cards/{cardId}/phonons", web.adminRedeemPhonon).Methods("DELETE")
-	r.HandleFunc("/admin/cards/{cardId}/phonons/send", web.adminSendPhonon).Methods("POST")
-	r.HandleFunc("/admin/cards/{cardId}/remote", web.adminConnectToRemotePairingServer).Methods("POST")
-	r.HandleFunc("/admin/cards/{cardId}/pair", web.adminPairCard).Methods("POST")
+	r.HandleFunc("/admin/permissions", handlerWrapper(web, adminAddPermissionsSettings, adminAddPermissions)).Methods("POST")
+	r.HandleFunc("/admin/cards/{cardId}/init", handlerWrapper(web, adminInitialiseCardSettings, adminInitialiseCard)).Methods("POST")
+	r.HandleFunc("/admin/cards/{cardId}/unlock", handlerWrapper(web, adminUnlockCardSettings, adminUnlockCard)).Methods("POST")
+	r.HandleFunc("/admin/cards/{cardId}/phonons", handlerWrapper(web, adminRedeemPhononSettings, adminRedeemPhonon)).Methods("DELETE")
+	r.HandleFunc("/admin/cards/{cardId}/phonons/send", handlerWrapper(web, adminSendPhononSettings, adminSendPhonon)).Methods("POST")
+	r.HandleFunc("/admin/cards/{cardId}/remote", handlerWrapper(web, adminConnectToRemotePairingServerSettings, adminConnectToRemotePairingServer)).Methods("POST")
+	r.HandleFunc("/admin/cards/{cardId}/pair", handlerWrapper(web, adminPairCardSettings, adminPairCard)).Methods("POST")
 
 	c := cors.New(cors.Options{
 		AllowedMethods:   []string{http.MethodGet, http.MethodPost, http.MethodDelete},
@@ -121,6 +122,40 @@ func (web *WebServer) Start(addr string) error {
 	return err
 }
 
+type HandlerPayload struct {
+	Web   *WebServer
+	AppId string
+	Card  *card.Card
+	Body  io.ReadCloser
+}
+
+type HandlerError struct {
+	Code    int
+	Message string
+}
+
+func handlerWrapper[t any](web *WebServer, requirements RouteSettings, handler func(payload HandlerPayload) (*t, *HandlerError)) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		appId, card, err := web.checkRouteSettings(w, r, requirements)
+		if err != nil {
+			return
+		}
+		result, error := handler(HandlerPayload{
+			Web:   web,
+			AppId: appId,
+			Card:  card,
+			Body:  r.Body,
+		})
+
+		if error != nil {
+			http.Error(w, error.Message, error.Code)
+			return
+		}
+
+		json.NewEncoder(w).Encode(result)
+	}
+}
+
 func (web *WebServer) establishWSConnection(w http.ResponseWriter, r *http.Request) {
 	appId := getAppIdFromRequest(r)
 
@@ -136,198 +171,188 @@ func (web *WebServer) establishWSConnection(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-func (web *WebServer) listPermissions(w http.ResponseWriter, r *http.Request) {
-	appId := getAppIdFromRequest(r)
-
-	permissions := web.permissions.GetPermissions(appId)
-	// go likes to encode empty arrays as nil. This hack ensures the correct JSON is returned.
+func listPermissions(p HandlerPayload) (*interfaces.GetPermissionsResponseBody, *HandlerError) {
+	permissions := p.Web.permissions.GetPermissions(p.AppId)
+	// golang likes to encode empty arrays as nil. This hack ensures the correct JSON is returned.
 	if len(permissions) == 0 {
 		permissions = make([]string, 0)
 	}
 
-	responseBody := &interfaces.GetPermissionsResponseBody{
+	return &interfaces.GetPermissionsResponseBody{
 		Permissions: permissions,
-	}
-
-	json.NewEncoder(w).Encode(responseBody)
+	}, nil
 }
 
-func (web *WebServer) requestPermissions(w http.ResponseWriter, r *http.Request) {
-	appId := getAppIdFromRequest(r)
-
+func requestPermissions(p HandlerPayload) (*interfaces.SuccessResponse, *HandlerError) {
 	var body interfaces.RequestPermissionsRequestBody
 
-	err := json.NewDecoder(r.Body).Decode(&body)
+	err := json.NewDecoder(p.Body).Decode(&body)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		return nil, &HandlerError{
+			Code:    http.StatusBadRequest,
+			Message: err.Error(),
+		}
 	}
 
 	areValid, invalid := permission.ArePermissionsValid(body.Permissions)
-
 	if !areValid {
-		http.Error(w, "invalid permissions: "+strings.Join(invalid, ","), http.StatusBadRequest)
-		return
+		return nil, &HandlerError{
+			Code:    http.StatusBadRequest,
+			Message: "invalid permissions: " + strings.Join(invalid, ","),
+		}
 	}
 
-	newPermissions := web.permissions.GetNewPermissions(appId, body.Permissions)
+	newPermissions := p.Web.permissions.GetNewPermissions(p.AppId, body.Permissions)
 
 	if body.AdminToken != nil {
-		if *body.AdminToken != web.AdminToken {
-			http.Error(w, "invalid admin token", http.StatusForbidden)
-			return
+		if *body.AdminToken != p.Web.AdminToken {
+			return nil, &HandlerError{
+				Code:    http.StatusForbidden,
+				Message: "invalid admin token",
+			}
 		}
-		web.adminSessionId = appId
+		p.Web.adminSessionId = p.AppId
 	} else {
-		payload := interfaces.NewPermissionRequestEvent(appId, newPermissions)
-		sendEvent(web.adminSessionId, payload, web)
+		payload := interfaces.NewPermissionRequestEvent(p.AppId, newPermissions)
+		sendEvent(p.Web.adminSessionId, payload, p.Web)
 	}
 
-	json.NewEncoder(w).Encode(&interfaces.SuccessResponse{
+	return &interfaces.SuccessResponse{
 		Success: true,
-	})
+	}, nil
 }
 
-func (web *WebServer) listCards(w http.ResponseWriter, r *http.Request) {
-	_, _, err := web.handleRequirements(w, r, RouteRequirements{
-		Permission: &permission.PERMISSION_READ_CARDS,
-	})
-	if err != nil {
-		return
-	}
+var listCardsSettings = RouteSettings{
+	RequiredPermission: &permission.PERMISSION_READ_CARDS,
+}
 
-	cards := interfaces.CardsToHttpCards(web.cards.Cards)
-
-	// go likes to encode empty arrays as nil. This hack ensures the correct JSON is returned.
+func listCards(p HandlerPayload) (*interfaces.GetCardsResponseBody, *HandlerError) {
+	cards := interfaces.CardsToHttpCards(p.Web.cards.Cards)
+	// golang likes to encode empty arrays as nil. This hack ensures the correct JSON is returned.
 	if len(cards) == 0 {
 		cards = make([]interfaces.Card, 0)
 	}
-	responseBody := interfaces.GetCardsResponseBody{
+	return &interfaces.GetCardsResponseBody{
 		Cards: cards,
-	}
-
-	json.NewEncoder(w).Encode(responseBody)
+	}, nil
 }
 
-func (web *WebServer) setCardName(w http.ResponseWriter, r *http.Request) {
-	_, card, err := web.handleRequirements(w, r, RouteRequirements{
-		Permission: &permission.PERMISSION_SET_CARD_NAME,
-	})
-	if err != nil {
-		return
+var requestCardUnlockSettings = RouteSettings{
+	RequiredPermission: &permission.PERMISSION_READ_CARDS,
+	CardCanBeLocked:    true,
+}
+
+func requestUnlockCard(p HandlerPayload) (*interfaces.SuccessResponse, *HandlerError) {
+	if !p.Card.Session.IsUnlocked() {
+		payload := interfaces.NewCardUnlockRequestEvent(p.AppId, p.Card.Session.GetCardId())
+		sendEvent(p.Web.adminSessionId, payload, p.Web)
 	}
 
+	return &interfaces.SuccessResponse{
+		Success: true,
+	}, nil
+}
+
+var setCardNameSetting = RouteSettings{
+	RequiredPermission: &permission.PERMISSION_SET_CARD_NAME,
+}
+
+func setCardName(p HandlerPayload) (*interfaces.SuccessResponse, *HandlerError) {
 	var body interfaces.SetCardNameRequestBody
 
-	err = json.NewDecoder(r.Body).Decode(&body)
+	err := json.NewDecoder(p.Body).Decode(&body)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		return nil, &HandlerError{
+			Code:    http.StatusBadRequest,
+			Message: err.Error(),
+		}
 	}
 
-	err = card.Session.SetName(body.Name)
+	err = p.Card.Session.SetName(body.Name)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return nil, &HandlerError{
+			Code:    http.StatusInternalServerError,
+			Message: err.Error(),
+		}
 	}
 
-	json.NewEncoder(w).Encode(interfaces.SuccessResponse{
+	return &interfaces.SuccessResponse{
 		Success: true,
-	})
+	}, nil
 }
 
-func (web *WebServer) requestUnlockCard(w http.ResponseWriter, r *http.Request) {
-	appId, card, err := web.handleRequirements(w, r, RouteRequirements{
-		Permission:      &permission.PERMISSION_READ_CARDS,
-		CardCanBeLocked: true,
-	})
-	if err != nil {
-		return
-	}
-
-	if !card.Session.IsUnlocked() {
-		payload := interfaces.NewCardUnlockRequestEvent(appId, card.Session.GetCardId())
-		sendEvent(web.adminSessionId, payload, web)
-	}
-
-	json.NewEncoder(w).Encode(interfaces.SuccessResponse{
-		Success: true,
-	})
+var listPhononsSettings = RouteSettings{
+	RequiredPermission: &permission.PERMISSION_READ_PHONONS,
 }
 
-func (web *WebServer) listPhonons(w http.ResponseWriter, r *http.Request) {
-	_, card, err := web.handleRequirements(w, r, RouteRequirements{
-		Permission: &permission.PERMISSION_READ_PHONONS,
-	})
+func listPhonons(p HandlerPayload) (*interfaces.GetPhononsResponseBody, *HandlerError) {
+	phonons, err := p.Card.Session.ListPhonons(0, 0, 0)
 	if err != nil {
-		return
+		return nil, &HandlerError{
+			Code:    http.StatusInternalServerError,
+			Message: err.Error(),
+		}
 	}
 
-	phonons, err := card.Session.ListPhonons(0, 0, 0)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	for _, p := range phonons {
-		if p.PubKey == nil {
-			p.PubKey, err = card.Session.GetPhononPubKey(p.KeyIndex, p.CurveType)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
+	for _, ph := range phonons {
+		if ph.PubKey == nil {
+			ph.PubKey, err = p.Card.Session.GetPhononPubKey(ph.KeyIndex, ph.CurveType)
+			return nil, &HandlerError{
+				Code:    http.StatusInternalServerError,
+				Message: err.Error(),
 			}
 		}
 	}
 
 	httpPhonons := interfaces.PhononsToHttpPhonons(phonons)
 
-	json.NewEncoder(w).Encode(interfaces.GetPhononsResponseBody{
+	return &interfaces.GetPhononsResponseBody{
 		Phonons: httpPhonons,
-	})
+	}, nil
 }
 
-func (web *WebServer) createPhonon(w http.ResponseWriter, r *http.Request) {
-	_, card, err := web.handleRequirements(w, r, RouteRequirements{
-		Permission: &permission.PERMISSION_CREATE_PHONONS,
-	})
+var createPhononSettings = RouteSettings{
+	RequiredPermission: &permission.PERMISSION_CREATE_PHONONS,
+}
+
+func createPhonon(p HandlerPayload) (*interfaces.Phonon, *HandlerError) {
+	index, publicKey, err := p.Card.Session.CreatePhonon()
 	if err != nil {
-		return
+		return nil, &HandlerError{
+			Message: err.Error(),
+			Code:    http.StatusInternalServerError,
+		}
 	}
 
-	index, publicKey, err := card.Session.CreatePhonon()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	sendPhononEvent(interfaces.SOCKET_EVENT_PHONON_CREATED, p.Web, p.Card.Session.GetCardId(), uint16(index))
 
-	sendPhononEvent(interfaces.SOCKET_EVENT_PHONON_CREATED, web, card.Session.GetCardId(), uint16(index))
-
-	json.NewEncoder(w).Encode(interfaces.Phonon{
+	return &interfaces.Phonon{
 		Index:     uint16(index),
 		PublicKey: publicKey.String(),
-	})
+	}, nil
 }
 
-func (web *WebServer) requestRedeemPhonon(w http.ResponseWriter, r *http.Request) {
-	appId, card, err := web.handleRequirements(w, r, RouteRequirements{
-		Permission: &permission.PERMISSION_READ_PHONONS,
-	})
-	if err != nil {
-		return
-	}
+var requestRedeemPhononSettings = RouteSettings{
+	RequiredPermission: &permission.PERMISSION_READ_PHONONS,
+}
 
+func requestRedeemPhonon(p HandlerPayload) (*interfaces.SuccessResponse, *HandlerError) {
 	var body interfaces.RequestRedeemPhononRequestBody
 
-	err = json.NewDecoder(r.Body).Decode(&body)
+	err := json.NewDecoder(p.Body).Decode(&body)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		return nil, &HandlerError{
+			Code:    http.StatusBadRequest,
+			Message: err.Error(),
+		}
 	}
 
-	phonons, err := card.Session.ListPhonons(0, 0, 0)
+	phonons, err := p.Card.Session.ListPhonons(0, 0, 0)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return nil, &HandlerError{
+			Message: err.Error(),
+			Code:    http.StatusInternalServerError,
+		}
 	}
 
 	foundPhonon := false
@@ -340,59 +365,61 @@ func (web *WebServer) requestRedeemPhonon(w http.ResponseWriter, r *http.Request
 	}
 
 	if !foundPhonon {
-		http.Error(w, "phonon not found", http.StatusNotFound)
-		return
+		return nil, &HandlerError{
+			Message: "Phonon not found",
+			Code:    http.StatusNotFound,
+		}
 	}
 
-	payload := interfaces.NewRedeemRequestEvent(appId, card.Session.GetCardId(), body.Index)
-	sendEvent(web.adminSessionId, payload, web)
+	payload := interfaces.NewRedeemRequestEvent(p.AppId, p.Card.Session.GetCardId(), body.Index)
+	sendEvent(p.Web.adminSessionId, payload, p.Web)
 
-	json.NewEncoder(w).Encode(interfaces.SuccessResponse{
+	return &interfaces.SuccessResponse{
 		Success: true,
-	})
+	}, nil
 }
 
-func (web *WebServer) adminConnectToRemotePairingServer(w http.ResponseWriter, r *http.Request) {
-	_, card, err := web.handleRequirements(w, r, RouteRequirements{
-		IsAdmin: true,
-	})
-	if err != nil {
-		return
-	}
+var adminConnectToRemotePairingServerSettings = RouteSettings{
+	RequiresAdmin: true,
+}
 
+func adminConnectToRemotePairingServer(p HandlerPayload) (*interfaces.SuccessResponse, *HandlerError) {
 	var body interfaces.ConnectToPairingServerRequestBody
 
-	err = json.NewDecoder(r.Body).Decode(&body)
+	err := json.NewDecoder(p.Body).Decode(&body)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		return nil, &HandlerError{
+			Code:    http.StatusBadRequest,
+			Message: err.Error(),
+		}
 	}
 
-	err = card.Session.ConnectToRemoteProvider(body.Url)
+	err = p.Card.Session.ConnectToRemoteProvider(body.Url)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		return nil, &HandlerError{
+			Code:    http.StatusBadRequest,
+			Message: err.Error(),
+		}
 	}
 
-	json.NewEncoder(w).Encode(interfaces.SuccessResponse{
+	return &interfaces.SuccessResponse{
 		Success: true,
-	})
+	}, nil
 }
 
-func (web *WebServer) adminSendPhonon(w http.ResponseWriter, r *http.Request) {
-	_, card, err := web.handleRequirements(w, r, RouteRequirements{
-		IsAdmin: true,
-	})
-	if err != nil {
-		return
-	}
+var adminSendPhononSettings = RouteSettings{
+	RequiresAdmin: true,
+}
 
+func adminSendPhonon(p HandlerPayload) (*interfaces.SuccessResponse, *HandlerError) {
 	var body interfaces.SendPhononsRequestBody
 
-	err = json.NewDecoder(r.Body).Decode(&body)
+	err := json.NewDecoder(p.Body).Decode(&body)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		return nil, &HandlerError{
+			Code:    http.StatusBadRequest,
+			Message: err.Error(),
+		}
 	}
 
 	var indices []model.PhononKeyIndex
@@ -401,64 +428,68 @@ func (web *WebServer) adminSendPhonon(w http.ResponseWriter, r *http.Request) {
 		indices = append(indices, model.PhononKeyIndex(i))
 	}
 
-	err = card.Session.SendPhonons(indices)
+	err = p.Card.Session.SendPhonons(indices)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return nil, &HandlerError{
+			Message: err.Error(),
+			Code:    http.StatusInternalServerError,
+		}
 	}
 
-	json.NewEncoder(w).Encode(interfaces.SuccessResponse{
+	return &interfaces.SuccessResponse{
 		Success: true,
-	})
+	}, nil
 }
 
-func (web *WebServer) adminPairCard(w http.ResponseWriter, r *http.Request) {
-	_, card, err := web.handleRequirements(w, r, RouteRequirements{
-		IsAdmin: true,
-	})
-	if err != nil {
-		return
-	}
+var adminPairCardSettings = RouteSettings{
+	RequiresAdmin: true,
+}
 
+func adminPairCard(p HandlerPayload) (*interfaces.SuccessResponse, *HandlerError) {
 	var body interfaces.PairCardRequestBody
 
-	err = json.NewDecoder(r.Body).Decode(&body)
+	err := json.NewDecoder(p.Body).Decode(&body)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		return nil, &HandlerError{
+			Code:    http.StatusBadRequest,
+			Message: err.Error(),
+		}
 	}
 
-	err = card.Session.ConnectToCounterparty(body.CounterpartyCardId)
+	err = p.Card.Session.ConnectToCounterparty(body.CounterpartyCardId)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return nil, &HandlerError{
+			Code:    http.StatusBadRequest,
+			Message: err.Error(),
+		}
 	}
 
-	json.NewEncoder(w).Encode(interfaces.SuccessResponse{
+	return &interfaces.SuccessResponse{
 		Success: true,
-	})
+	}, nil
 }
 
-func (web *WebServer) adminRedeemPhonon(w http.ResponseWriter, r *http.Request) {
-	_, card, err := web.handleRequirements(w, r, RouteRequirements{
-		IsAdmin: true,
-	})
-	if err != nil {
-		return
-	}
+var adminRedeemPhononSettings = RouteSettings{
+	RequiresAdmin: true,
+}
 
+func adminRedeemPhonon(p HandlerPayload) (*interfaces.RedeemPhononResponseBody, *HandlerError) {
 	var body interfaces.RedeemPhononRequestBody
 
-	err = json.NewDecoder(r.Body).Decode(&body)
+	err := json.NewDecoder(p.Body).Decode(&body)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		return nil, &HandlerError{
+			Code:    http.StatusBadRequest,
+			Message: err.Error(),
+		}
 	}
 
-	phonons, err := card.Session.ListPhonons(0, 0, 0)
+	phonons, err := p.Card.Session.ListPhonons(0, 0, 0)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return nil, &HandlerError{
+			Code:    http.StatusInternalServerError,
+			Message: err.Error(),
+		}
 	}
 
 	foundPhonon := false
@@ -471,134 +502,141 @@ func (web *WebServer) adminRedeemPhonon(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if !foundPhonon {
-		http.Error(w, "phonon not found", http.StatusNotFound)
-		return
+		return nil, &HandlerError{
+			Message: "Phonon not found",
+			Code:    http.StatusNotFound,
+		}
 	}
 
-	privateKey, err := card.Session.DestroyPhonon(model.PhononKeyIndex(body.Index))
+	privateKey, err := p.Card.Session.DestroyPhonon(model.PhononKeyIndex(body.Index))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return nil, &HandlerError{
+			Code:    http.StatusInternalServerError,
+			Message: err.Error(),
+		}
 	}
 
 	privateKeyHex := hex.EncodeToString(crypto.FromECDSA(privateKey))
 
 	if body.AppId != nil {
-		sendEvent(*body.AppId, interfaces.NewPhononRedeemActionedEvent(card.Session.GetCardId(), body.Index, privateKeyHex), web)
+		sendEvent(*body.AppId, interfaces.NewPhononRedeemActionedEvent(p.Card.Session.GetCardId(), body.Index, privateKeyHex), p.Web)
 	}
 
-	sendPhononEvent(interfaces.SOCKET_EVENT_PHONON_REDEEMED, web, card.Session.GetCardId(), body.Index)
+	sendPhononEvent(interfaces.SOCKET_EVENT_PHONON_REDEEMED, p.Web, p.Card.Session.GetCardId(), body.Index)
 
-	json.NewEncoder(w).Encode(interfaces.RedeemPhononResponseBody{
+	return &interfaces.RedeemPhononResponseBody{
 		PrivateKey: privateKeyHex,
-	})
+	}, nil
 }
 
-func (web *WebServer) adminInitialiseCard(w http.ResponseWriter, r *http.Request) {
-	_, card, err := web.handleRequirements(w, r, RouteRequirements{
-		IsAdmin:                true,
-		CardCanBeLocked:        true,
-		CardCanBeUninitialised: true,
-	})
-	if err != nil {
-		return
-	}
+var adminInitialiseCardSettings = RouteSettings{
+	RequiresAdmin:          true,
+	CardCanBeLocked:        true,
+	CardCanBeUninitialised: true,
+}
 
-	if card.Session.IsInitialized() {
-		http.Error(w, "card is already initialized", http.StatusBadRequest)
-		return
+func adminInitialiseCard(p HandlerPayload) (*interfaces.SuccessResponse, *HandlerError) {
+	if p.Card.Session.IsInitialized() {
+		return nil, &HandlerError{
+			Code:    http.StatusBadRequest,
+			Message: "card is already initialized",
+		}
 	}
 
 	var body interfaces.InitialiseCardRequestBody
 
-	err = json.NewDecoder(r.Body).Decode(&body)
+	err := json.NewDecoder(p.Body).Decode(&body)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		return nil, &HandlerError{
+			Code:    http.StatusBadRequest,
+			Message: err.Error(),
+		}
 	}
 
-	err = card.Session.Init(body.Pin)
+	err = p.Card.Session.Init(body.Pin)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return nil, &HandlerError{
+			Code:    http.StatusInternalServerError,
+			Message: err.Error(),
+		}
 	}
 
-	json.NewEncoder(w).Encode(interfaces.SuccessResponse{
+	return &interfaces.SuccessResponse{
 		Success: true,
-	})
+	}, nil
 }
 
-func (web *WebServer) adminUnlockCard(w http.ResponseWriter, r *http.Request) {
-	_, card, err := web.handleRequirements(w, r, RouteRequirements{
-		IsAdmin:         true,
-		CardCanBeLocked: true,
-	})
-	if err != nil {
-		return
-	}
+var adminUnlockCardSettings = RouteSettings{
+	RequiresAdmin:   true,
+	CardCanBeLocked: true,
+}
 
-	if card.Session.IsUnlocked() {
-		json.NewEncoder(w).Encode(interfaces.SuccessResponse{
+func adminUnlockCard(p HandlerPayload) (*interfaces.SuccessResponse, *HandlerError) {
+	if p.Card.Session.IsUnlocked() {
+		return &interfaces.SuccessResponse{
 			Success: true,
-		})
-		return
+		}, nil
 	}
 
 	var body interfaces.UnlockCardRequestBody
 
-	err = json.NewDecoder(r.Body).Decode(&body)
+	err := json.NewDecoder(p.Body).Decode(&body)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		return nil, &HandlerError{
+			Code:    http.StatusBadRequest,
+			Message: err.Error(),
+		}
 	}
 
-	err = card.Session.VerifyPIN(body.Pin)
+	err = p.Card.Session.VerifyPIN(body.Pin)
 	if err != nil {
-		http.Error(w, "Failed to unlock card", http.StatusBadRequest)
-		return
+		return nil, &HandlerError{
+			Code:    http.StatusBadRequest,
+			Message: "Failed to unlock card",
+		}
 	}
 
-	sendCardEvent(interfaces.SOCKET_EVENT_CARD_UNLOCKED, web, card.Session.GetCardId())
+	sendCardEvent(interfaces.SOCKET_EVENT_CARD_UNLOCKED, p.Web, p.Card.Session.GetCardId())
 
-	json.NewEncoder(w).Encode(interfaces.SuccessResponse{
+	return &interfaces.SuccessResponse{
 		Success: true,
-	})
+	}, nil
 }
 
-func (web *WebServer) adminAddPermissions(w http.ResponseWriter, r *http.Request) {
-	_, _, err := web.handleRequirements(w, r, RouteRequirements{
-		IsAdmin: true,
-	})
-	if err != nil {
-		return
-	}
+var adminAddPermissionsSettings = RouteSettings{
+	RequiresAdmin: true,
+}
 
+func adminAddPermissions(p HandlerPayload) (*interfaces.SuccessResponse, *HandlerError) {
 	var body interfaces.AddPermissionsRequestBody
 
-	err = json.NewDecoder(r.Body).Decode(&body)
+	err := json.NewDecoder(p.Body).Decode(&body)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		return nil, &HandlerError{
+			Code:    http.StatusBadRequest,
+			Message: err.Error(),
+		}
 	}
-
 	areValid, invalid := permission.ArePermissionsValid(body.Permissions)
 
 	if !areValid {
-		http.Error(w, "invalid permissions: "+strings.Join(invalid, ","), http.StatusBadRequest)
-		return
+		return nil, &HandlerError{
+			Code:    http.StatusBadRequest,
+			Message: "invalid permissions: " + strings.Join(invalid, ","),
+		}
 	}
 
-	web.permissions.AddPermissions(body.AppId, body.Permissions)
+	p.Web.permissions.AddPermissions(body.AppId, body.Permissions)
 
-	allPermissions := web.permissions.GetPermissions(body.AppId)
+	allPermissions := p.Web.permissions.GetPermissions(body.AppId)
 
 	payload := interfaces.NewPermissionsEvent(body.Permissions, allPermissions)
 
-	sendEvent(body.AppId, payload, web)
+	sendEvent(body.AppId, payload, p.Web)
 
-	json.NewEncoder(w).Encode(interfaces.SuccessResponse{
+	return &interfaces.SuccessResponse{
 		Success: true,
-	})
+	}, nil
 }
 
 func contentTypeApplicationJsonMiddleware(next http.Handler) http.Handler {
@@ -722,22 +760,22 @@ func (web *WebServer) getAuthMiddleware() func(next http.Handler) http.Handler {
 	}
 }
 
-type RouteRequirements struct {
-	IsAdmin                bool
-	Permission             *string
+type RouteSettings struct {
+	RequiresAdmin          bool
+	RequiredPermission     *string
 	CardCanBeLocked        bool
 	CardCanBeUninitialised bool
 }
 
-func (web *WebServer) handleRequirements(w http.ResponseWriter, r *http.Request, requirements RouteRequirements) (appId string, card *card.Card, err error) {
+func (web *WebServer) checkRouteSettings(w http.ResponseWriter, r *http.Request, requirements RouteSettings) (appId string, card *card.Card, err error) {
 	appId = getAppIdFromRequest(r)
 
-	if requirements.IsAdmin && appId != web.adminSessionId {
+	if requirements.RequiresAdmin && appId != web.adminSessionId {
 		w.WriteHeader(http.StatusForbidden)
 		return "", nil, errors.New("App not admin")
 	}
 
-	if appId != web.adminSessionId && requirements.Permission != nil && !web.permissions.HasPermission(appId, *requirements.Permission) {
+	if appId != web.adminSessionId && requirements.RequiredPermission != nil && !web.permissions.HasPermission(appId, *requirements.RequiredPermission) {
 		w.WriteHeader(http.StatusForbidden)
 		return "", nil, errors.New("App doesn't have permission")
 	}
