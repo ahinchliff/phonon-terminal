@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"strings"
@@ -30,8 +29,6 @@ type TestHelpers[body any] struct {
 
 func setupTest[body any](t *testing.T) TestHelpers[body] {
 	filePath := "./permissions.json"
-
-	ioutil.WriteFile(filePath, []byte("[]"), 0644)
 
 	if web == nil {
 		cardManager := card.NewCardManager()

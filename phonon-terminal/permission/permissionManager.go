@@ -25,8 +25,10 @@ func NewPermissionsManager(storePath string) *PermissionManager {
 
 	content, err := ioutil.ReadFile(storePath)
 	if err != nil {
-		fmt.Println("Error loading file", err)
-		return manager
+		fmt.Println("Error loading file", err.Error())
+		fmt.Println("Creating new permissions file")
+		ioutil.WriteFile(storePath, []byte("[]"), 0644)
+		content, _ = ioutil.ReadFile(storePath)
 	}
 
 	var savedPermissions []SavedPermission
