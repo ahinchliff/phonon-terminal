@@ -7,3 +7,5 @@ native-wallet/build/darwin
 native-wallet/build/windows
 
 phonon-terminal/permissions.json
+phonon-terminal/web/server.key
+phonon-terminal/web/server.pem

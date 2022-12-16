@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/GridPlus/phonon-client/model"
+	pairingServer "github.com/GridPlus/phonon-client/remote/v1/server"
 	"github.com/ahinchliff/phonon-terminal/phonon-terminal/card"
 	"github.com/ahinchliff/phonon-terminal/phonon-terminal/permission"
 	"github.com/ahinchliff/phonon-terminal/phonon-terminal/web/interfaces"
@@ -34,6 +35,8 @@ func setupTest[body any](t *testing.T) TestHelpers[body] {
 		cardManager := card.NewCardManager()
 		web, _ = New(cardManager, CreateSecret(), filePath)
 		go web.Start(":3001")
+		go pairingServer.StartServer("3002", "./server.pem", "./server.key")
+
 	}
 
 	getIdReq, _ := http.NewRequest("GET", "http://localhost:3001/permissions", nil)
@@ -838,5 +841,238 @@ func TestInitialiseCard(t *testing.T) {
 		assert := assert.New(t)
 		assert.Equal(http.StatusOK, res.StatusCode)
 		assert.True(card.Session.IsInitialized())
+	})
+}
+
+func TestAdminConnectToRemotePairingServer(t *testing.T) {
+	getEndpoint := func(cardId string) string {
+		return "http://localhost:3001/admin/cards/" + cardId + "/remote"
+	}
+
+	pairingUrl := "http://localhost:3002"
+
+	t.Run("Returns forbidden when app is not admin", func(t *testing.T) {
+		helpers := setupTest[interfaces.ConnectToPairingServerRequestBody](t)
+		card := createMockCard(true, true)
+		defer helpers.Teardown(t)
+
+		requestBody := interfaces.ConnectToPairingServerRequestBody{
+			Url: pairingUrl,
+		}
+
+		res := helpers.SendRequest("POST", getEndpoint(card.Session.GetCardId()), &requestBody)
+
+		assert := assert.New(t)
+		assert.Equal(http.StatusForbidden, res.StatusCode)
+	})
+
+	t.Run("Returns not found when supplied an invalid card ID", func(t *testing.T) {
+		helpers := setupTest[interfaces.ConnectToPairingServerRequestBody](t)
+		helpers.SetAsAdmin()
+		defer helpers.Teardown(t)
+
+		requestBody := interfaces.ConnectToPairingServerRequestBody{
+			Url: pairingUrl,
+		}
+
+		res := helpers.SendRequest("POST", getEndpoint("invalid"), &requestBody)
+
+		assert := assert.New(t)
+		assert.Equal(http.StatusNotFound, res.StatusCode)
+	})
+
+	t.Run("Returns bad request when supplied an invalid url", func(t *testing.T) {
+		helpers := setupTest[interfaces.ConnectToPairingServerRequestBody](t)
+		helpers.SetAsAdmin()
+		card := createMockCard(true, true)
+		defer helpers.Teardown(t)
+
+		requestBody := interfaces.ConnectToPairingServerRequestBody{
+			Url: "http://localhost:3003",
+		}
+
+		res := helpers.SendRequest("POST", getEndpoint(card.Session.GetCardId()), &requestBody)
+
+		assert := assert.New(t)
+		assert.Equal(http.StatusBadRequest, res.StatusCode)
+	})
+
+	t.Run("Connects to the remote pairing server", func(t *testing.T) {
+		helpers := setupTest[interfaces.ConnectToPairingServerRequestBody](t)
+		helpers.SetAsAdmin()
+		card := createMockCard(true, true)
+		defer helpers.Teardown(t)
+
+		requestBody := interfaces.ConnectToPairingServerRequestBody{
+			Url: pairingUrl,
+		}
+
+		res := helpers.SendRequest("POST", getEndpoint(card.Session.GetCardId()), &requestBody)
+
+		assert := assert.New(t)
+		assert.Equal(http.StatusOK, res.StatusCode)
+	})
+}
+
+func TestAdminPairCard(t *testing.T) {
+	getEndpoint := func(cardId string) string {
+		return "http://localhost:3001/admin/cards/" + cardId + "/pair"
+	}
+
+	pairingUrl := "http://localhost:3002"
+
+	t.Run("Returns forbidden when app is not admin", func(t *testing.T) {
+		helpers := setupTest[interfaces.PairCardRequestBody](t)
+		card1 := createMockCard(true, true)
+		card2 := createMockCard(true, true)
+		defer helpers.Teardown(t)
+
+		card1.Session.ConnectToRemoteProvider(pairingUrl)
+		card2.Session.ConnectToRemoteProvider(pairingUrl)
+
+		requestBody := interfaces.PairCardRequestBody{
+			CounterpartyCardId: card2.Session.GetCardId(),
+		}
+
+		res := helpers.SendRequest("POST", getEndpoint(card1.Session.GetCardId()), &requestBody)
+
+		assert := assert.New(t)
+		assert.Equal(http.StatusForbidden, res.StatusCode)
+	})
+
+	t.Run("Returns not found when supplied an invalid card ID", func(t *testing.T) {
+		helpers := setupTest[interfaces.PairCardRequestBody](t)
+		helpers.SetAsAdmin()
+		card1 := createMockCard(true, true)
+		card2 := createMockCard(true, true)
+		defer helpers.Teardown(t)
+
+		card1.Session.ConnectToRemoteProvider(pairingUrl)
+		card2.Session.ConnectToRemoteProvider(pairingUrl)
+
+		requestBody := interfaces.PairCardRequestBody{
+			CounterpartyCardId: card2.Session.GetCardId(),
+		}
+
+		res := helpers.SendRequest("POST", getEndpoint("invalid"), &requestBody)
+
+		assert := assert.New(t)
+		assert.Equal(http.StatusNotFound, res.StatusCode)
+	})
+
+	t.Run("Correctly pairs", func(t *testing.T) {
+		helpers := setupTest[interfaces.PairCardRequestBody](t)
+		helpers.SetAsAdmin()
+		card1 := createMockCard(true, true)
+		card2 := createMockCard(true, true)
+		defer helpers.Teardown(t)
+
+		card1.Session.ConnectToRemoteProvider(pairingUrl)
+		card2.Session.ConnectToRemoteProvider(pairingUrl)
+
+		requestBody := interfaces.PairCardRequestBody{
+			CounterpartyCardId: card2.Session.GetCardId(),
+		}
+
+		res := helpers.SendRequest("POST", getEndpoint(card1.Session.GetCardId()), &requestBody)
+
+		assert := assert.New(t)
+		assert.Equal(http.StatusOK, res.StatusCode)
+	})
+}
+
+func TestAdminSendPhonon(t *testing.T) {
+	getEndpoint := func(cardId string) string {
+		return "http://localhost:3001/admin/cards/" + cardId + "/phonons/" + "send"
+	}
+
+	pairingUrl := "http://localhost:3002"
+
+	t.Run("Returns forbidden when app is not admin", func(t *testing.T) {
+		helpers := setupTest[interfaces.SendPhononsRequestBody](t)
+		card1 := createMockCard(true, true)
+		card2 := createMockCard(true, true)
+		index, _, _ := card1.Session.CreatePhonon()
+		defer helpers.Teardown(t)
+
+		card1.Session.ConnectToRemoteProvider(pairingUrl)
+		card2.Session.ConnectToRemoteProvider(pairingUrl)
+
+		requestBody := interfaces.SendPhononsRequestBody{
+			PhononIndices: []uint16{uint16(index)},
+		}
+
+		res := helpers.SendRequest("POST", getEndpoint(card1.Session.GetCardId()), &requestBody)
+
+		assert := assert.New(t)
+		assert.Equal(http.StatusForbidden, res.StatusCode)
+	})
+
+	t.Run("Returns not found when supplied an invalid card ID", func(t *testing.T) {
+		helpers := setupTest[interfaces.SendPhononsRequestBody](t)
+		helpers.SetAsAdmin()
+		card1 := createMockCard(true, true)
+		card2 := createMockCard(true, true)
+		index, _, _ := card1.Session.CreatePhonon()
+		defer helpers.Teardown(t)
+
+		card1.Session.ConnectToRemoteProvider(pairingUrl)
+		card2.Session.ConnectToRemoteProvider(pairingUrl)
+
+		requestBody := interfaces.SendPhononsRequestBody{
+			PhononIndices: []uint16{uint16(index)},
+		}
+
+		res := helpers.SendRequest("POST", getEndpoint("invalid"), &requestBody)
+
+		assert := assert.New(t)
+		assert.Equal(http.StatusNotFound, res.StatusCode)
+	})
+
+	t.Run("Returns not found when supplied an invalid phonon index", func(t *testing.T) {
+		helpers := setupTest[interfaces.SendPhononsRequestBody](t)
+		helpers.SetAsAdmin()
+		card1 := createMockCard(true, true)
+		card2 := createMockCard(true, true)
+		defer helpers.Teardown(t)
+
+		card1.Session.ConnectToRemoteProvider(pairingUrl)
+		card2.Session.ConnectToRemoteProvider(pairingUrl)
+
+		requestBody := interfaces.SendPhononsRequestBody{
+			PhononIndices: []uint16{uint16(10)},
+		}
+
+		res := helpers.SendRequest("POST", getEndpoint(card1.Session.GetCardId()), &requestBody)
+
+		assert := assert.New(t)
+		assert.Equal(http.StatusNotFound, res.StatusCode)
+	})
+
+	t.Run("Correctly sends", func(t *testing.T) {
+		helpers := setupTest[interfaces.SendPhononsRequestBody](t)
+		helpers.SetAsAdmin()
+		card1 := createMockCard(true, true)
+		card2 := createMockCard(true, true)
+		index, _, _ := card1.Session.CreatePhonon()
+		defer helpers.Teardown(t)
+
+		card1.Session.ConnectToRemoteProvider(pairingUrl)
+		card2.Session.ConnectToRemoteProvider(pairingUrl)
+		card1.Session.ConnectToCounterparty(card2.Session.GetCardId())
+
+		requestBody := interfaces.SendPhononsRequestBody{
+			PhononIndices: []uint16{uint16(index)},
+		}
+
+		res := helpers.SendRequest("POST", getEndpoint(card1.Session.GetCardId()), &requestBody)
+
+		card1Phonons, _ := card1.Session.ListPhonons(0, 0, 0)
+		card2Phonons, _ := card2.Session.ListPhonons(0, 0, 0)
+
+		assert := assert.New(t)
+		assert.Equal(http.StatusOK, res.StatusCode)
+		assert.Equal(0, len(card1Phonons))
+		assert.Equal(1, len(card2Phonons))
 	})
 }

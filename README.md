@@ -2,7 +2,9 @@
 
 Currently a mono repo. Once ready for release only the contents of `./phonon-terminal` will be included in the repo. This is my first golang project so feedback is very welcome.
 
-## Phonon Terminal
+## Components
+
+### Phonon Terminal
 
 A web server written in golang designed to be run on a user's local machine.
 
@@ -10,8 +12,7 @@ A web server written in golang designed to be run on a user's local machine.
 - endpoints to request and grant permissions
 - web sockets for pushing card and permission changes to subscribers
 - logic to watch for card reader state changes
-
-## Components
+- run the three commands found at https://gist.github.com/6174/9ff5063a43f0edd82c8186e417aae1dc before running the tests.
 
 ### Phonon Terminal JS
 

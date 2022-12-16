@@ -388,10 +388,35 @@ func adminSendPhonon(p HandlerPayload) (*interfaces.SuccessResponse, *HandlerErr
 		return nil, newHandlerError(http.StatusBadRequest, "invalid body")
 	}
 
+	phonons, err := p.Card.Session.ListPhonons(0, 0, 0)
+	if err != nil {
+		return nil, newHandlerError(http.StatusInternalServerError, err.Error())
+	}
+
 	var indices []model.PhononKeyIndex
 
 	for _, i := range body.PhononIndices {
 		indices = append(indices, model.PhononKeyIndex(i))
+	}
+
+	notFoundIndices := []model.PhononKeyIndex{}
+
+	for _, i := range indices {
+		foundPhonon := false
+		for _, phonon := range phonons {
+			if phonon.KeyIndex == i {
+				foundPhonon = true
+				break
+			}
+		}
+
+		if !foundPhonon {
+			notFoundIndices = append(notFoundIndices, i)
+		}
+	}
+
+	if len(notFoundIndices) > 0 {
+		return nil, newHandlerError(http.StatusNotFound, "phonons not found: "+fmt.Sprint(notFoundIndices))
 	}
 
 	err = p.Card.Session.SendPhonons(indices)

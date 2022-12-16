@@ -72,7 +72,7 @@ type PairCardRequestBody struct {
 }
 
 type SendPhononsRequestBody struct {
-	PhononIndices string `json:"phononIndices"`
+	PhononIndices []uint16 `json:"phononIndices"`
 }
 
 type InitialiseCardRequestBody struct {
